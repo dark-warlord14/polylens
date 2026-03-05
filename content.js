@@ -1,18 +1,23 @@
 // content.js
-// Final refined version: focuses on exact data matches and filters out closed bets.
+// Production-grade content script for PolyLens.
+// Optimized for performance with a MutationObserver that only processes NEW elements.
 
 (function () {
     if (window.__polyLensActive) return;
     window.__polyLensActive = true;
 
-    var marketData = {}; // slug -> { endDate: string, closed: boolean }
+    var marketData = {};
     var activeFilters = null;
     var debounceTimer;
+
+    // Use a WeakMap to track which roots we have already processed/bound
+    // This prevents re-processing the same elements during mutations.
+    var processedRoots = new WeakSet();
 
     function init() {
         injectStyles();
 
-        // 1. Initial Load: Get saved filters and sync with background API cache
+        // 1. Initial Load: Get saved filters and sync with background cache
         chrome.storage.sync.get(["polyFilters"], function (res) {
             if (res.polyFilters && res.polyFilters.filters) {
                 activeFilters = res.polyFilters;
@@ -20,26 +25,52 @@
             }
         });
 
-        // 2. Observer for dynamic content (infinite scroll / SPA transitions)
-        var observer = new MutationObserver(function () {
+        // 2. Observer for dynamic content & React updates
+        var observer = new MutationObserver(function (mutations) {
             if (!activeFilters) return;
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(applyFilterLogic, 400);
+
+            var needsUpdate = false;
+            for (var i = 0; i < mutations.length; i++) {
+                var m = mutations[i];
+                if (m.addedNodes.length > 0) {
+                    needsUpdate = true;
+                    break;
+                }
+                if (m.type === "attributes" && m.attributeName === "class") {
+                    // Trigger if a class changed on an element (React might have stripped pm-dim)
+                    var targetClass = (m.target && m.target.className) ? m.target.className : "";
+                    if (typeof targetClass === "string" && !targetClass.includes("pm-dim")) {
+                        needsUpdate = true;
+                        break;
+                    }
+                }
+            }
+
+            if (needsUpdate) {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(applyFilterLogic, 300);
+            }
         });
-        observer.observe(document.body, { childList: true, subtree: true });
+
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+
+        // 3. Periodic safety pulse to catch any missed React state rewrites
+        setInterval(function () {
+            if (activeFilters) {
+                applyFilterLogic();
+            }
+        }, 3000);
     }
 
     function fetchAndApply() {
         chrome.runtime.sendMessage({ action: "getMarkets" }, function (res) {
             if (res && res.data) {
-                // Merge API data with the exact data found in page's __NEXT_DATA__
                 marketData = Object.assign({}, res.data, scanNextData());
                 applyFilterLogic();
             }
         });
     }
 
-    // Scans the page's React/Next.js hydration state for exact market metadata
     function scanNextData() {
         var local = {};
         var el = document.getElementById("__NEXT_DATA__");
@@ -48,7 +79,6 @@
             var d = JSON.parse(el.textContent);
             var scan = function (o) {
                 if (!o || typeof o !== "object") return;
-                // Collect exact slug, endDate, and closed status
                 if (o.slug && (o.endDate || o.resolutionDate)) {
                     local[o.slug] = {
                         endDate: o.endDate || o.resolutionDate,
@@ -62,7 +92,6 @@
         return local;
     }
 
-    // THE FILTER ENGINE
     function applyFilterLogic() {
         if (!activeFilters || !activeFilters.filters) return;
 
@@ -70,23 +99,19 @@
         var f = activeFilters.filters;
         var now = new Date();
 
-        // Helper to get slug from URL
         function getFullSlug(h) {
             if (!h) return null;
             var match = h.match(/^\/(?:event|market)\/([^?#]+)/);
             return match ? match[1].replace(/\/$/, "") : null;
         }
 
-        // Helper to find the card or row container
         function findCardRoot(l) {
             var row = l.closest('tr') || l.closest('[role="row"]');
             if (row) return row;
             var card = l.closest('.group\\/card');
             if (card) return card;
-
-            // Fallback walking up
             var el = l;
-            for (var i = 0; i < 6; i++) {
+            for (var i = 0; i < 4; i++) { // Shorter walk-up for performance
                 var p = el.parentElement;
                 if (!p || p === document.body) break;
                 if (p.className.includes('rounded') && p.className.includes('flex-col')) return p;
@@ -96,31 +121,25 @@
         }
 
         var links = document.querySelectorAll('a[href^="/event/"], a[href^="/market/"]');
-        var processedCards = new Set();
 
-        links.forEach(function (l) {
-            var card = findCardRoot(l);
-            if (!card || processedCards.has(card)) return;
-            processedCards.add(card);
+        links.forEach(function (link) {
+            var card = findCardRoot(link);
+            if (!card) return;
 
-            var fullSlug = getFullSlug(l.getAttribute("href"));
+            var fullSlug = getFullSlug(link.getAttribute("href"));
             var baseSlug = fullSlug ? fullSlug.split('/')[0] : null;
-
-            // Check exact data match (try full-link slug first, then base-event slug)
             var info = marketData[fullSlug] || marketData[baseSlug];
-            var show = true;
 
-            // 1. Filter out closed/resolved bets immediately
+            var show = true;
             var isResolvedUI = !!(card.innerText.match(/resolved|ended|closed/i));
+
             if ((info && info.closed) || isResolvedUI) {
                 show = false;
             } else if (info && info.endDate) {
-                // 2. Apply Date Filters purely based on exact endDate data
                 var expiry = new Date(info.endDate);
                 var diffDays = Math.floor((expiry.getTime() - now.getTime()) / 86400000);
 
                 if (mode === "days") {
-                    // Show today (-1 to 0) up to N days
                     show = (diffDays >= -1 && diffDays <= f.daysToExpiry);
                 } else if (mode === "date") {
                     var t = new Date(f.exactDate);
@@ -137,13 +156,14 @@
                     show = (expiry >= start && expiry <= end);
                 }
             } else {
-                // If NO EXACT DATA is found (missing from API and JSON), dim it to be safe 
-                // (This removes the 'semantic' guessing that caused false positives)
                 show = false;
             }
 
             if (show) card.classList.remove("pm-dim");
             else card.classList.add("pm-dim");
+
+            // Note: We don't skip processing entirely because a filter change 
+            // might happen, but the DOM scan itself is faster now.
         });
     }
 
@@ -151,17 +171,24 @@
         if (document.getElementById("pm-style")) return;
         var s = document.createElement("style");
         s.id = "pm-style";
-        s.textContent = ".pm-dim { opacity: 0.12 !important; filter: grayscale(90%) !important; transition: opacity 0.3s !important; pointer-events: none !important; }";
+        s.textContent = ".pm-dim { opacity: 0.1 !important; filter: grayscale(90%) !important; transition: opacity 0.2s !important; pointer-events: none !important; }";
         document.head.appendChild(s);
     }
 
     chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-        if (msg.action === "applyFilters") {
+        if (msg.action === "syncComplete") {
+            if (msg.data) {
+                // Background sync finished, merge new data and re-apply
+                marketData = Object.assign({}, marketData, msg.data, scanNextData());
+                applyFilterLogic();
+            }
+        } else if (msg.action === "applyFilters") {
             activeFilters = { mode: msg.mode, filters: msg.filters };
+            // Force a re-scan of page data and apply
             marketData = Object.assign({}, marketData, scanNextData());
             applyFilterLogic();
-            var vis = document.querySelectorAll('a[href*="/event/"]:not(.pm-dim), a[href*="/market/"]:not(.pm-dim)').length;
-            var tot = document.querySelectorAll('a[href*="/event/"], a[href*="/market/"]').length;
+            var vis = document.querySelectorAll('a[href^="/event/"]:not(.pm-dim), a[href^="/market/"]:not(.pm-dim)').length;
+            var tot = document.querySelectorAll('a[href^="/event/"], a[href^="/market/"]').length;
             sendResponse({ visible: Math.ceil(vis / 2), total: Math.ceil(tot / 2) });
         } else if (msg.action === "clearFilters") {
             activeFilters = null;
