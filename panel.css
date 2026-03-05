@@ -1,0 +1,398 @@
+/* ============================================================
+   Polymarket Date Filter — Injected Styles
+   ============================================================ */
+
+/* ── Floating Panel ── */
+#pm-filter-panel {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2147483647;
+  width: 300px;
+  background: #0d1117;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(99, 102, 241, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+  font-size: 13px;
+  color: #e2e8f0;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+#pm-filter-panel.pm-collapsed {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+#pm-filter-panel.pm-collapsed #pm-panel-body {
+  display: none;
+}
+
+#pm-filter-panel.pm-collapsed #pm-panel-header {
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  height: 48px;
+  width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  cursor: pointer;
+}
+
+#pm-filter-panel.pm-collapsed #pm-panel-header .pm-header-left {
+  display: none;
+}
+
+#pm-filter-panel.pm-collapsed #pm-toggle-btn {
+  color: #fff;
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
+/* ── Panel Header ── */
+#pm-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px 16px 0 0;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.08) 100%);
+  cursor: move;
+}
+
+.pm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pm-header-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.pm-header-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #a5b4fc;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.pm-header-subtitle {
+  font-size: 10px;
+  color: rgba(165, 180, 252, 0.6);
+  margin-left: 4px;
+  font-weight: 400;
+}
+
+#pm-toggle-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#pm-toggle-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Panel Body ── */
+#pm-panel-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── API Status ── */
+#pm-api-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#pm-api-status.pm-status-loading {
+  color: #fbbf24;
+}
+
+#pm-api-status.pm-status-ok {
+  color: #34d399;
+}
+
+#pm-api-status.pm-status-error {
+  color: #f87171;
+}
+
+.pm-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.pm-status-dot.pm-pulse {
+  animation: pm-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pm-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* ── Filter Mode Tabs ── */
+.pm-mode-tabs {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.pm-mode-tab {
+  flex: 1;
+  padding: 6px 4px;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.pm-mode-tab:hover {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.pm-mode-tab.pm-active {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+}
+
+/* ── Filter Sections ── */
+.pm-filter-section {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  animation: pm-fade-in 0.2s ease;
+}
+
+.pm-filter-section.pm-visible {
+  display: flex;
+}
+
+@keyframes pm-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.pm-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.pm-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  outline: none;
+  -webkit-appearance: none;
+}
+
+.pm-input:focus {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.08);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.pm-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}
+
+.pm-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pm-input-row .pm-input {
+  flex: 1;
+}
+
+.pm-input-row span {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pm-days-hint {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+}
+
+/* ── Buttons ── */
+.pm-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.pm-btn {
+  flex: 1;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.3px;
+}
+
+.pm-btn-apply {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.pm-btn-apply:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.5);
+}
+
+.pm-btn-apply:active {
+  transform: translateY(0);
+}
+
+.pm-btn-clear {
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pm-btn-clear:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* ── Stats Bar ── */
+#pm-stats-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+}
+
+.pm-stats-visible {
+  color: #34d399;
+  font-weight: 700;
+}
+
+.pm-stats-total {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.pm-stats-label {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Active Filter Badge ── */
+#pm-active-badge {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 20px;
+  font-size: 11px;
+  color: #a5b4fc;
+  animation: pm-fade-in 0.2s ease;
+}
+
+#pm-active-badge.pm-visible {
+  display: flex;
+}
+
+.pm-badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6366f1;
+  box-shadow: 0 0 6px #6366f1;
+}
+
+/* ── Market Dimming ── */
+.pm-market-dimmed {
+  opacity: 0.18 !important;
+  filter: grayscale(60%) !important;
+  transition: opacity 0.3s ease, filter 0.3s ease !important;
+  pointer-events: none !important;
+}
+
+.pm-market-visible {
+  opacity: 1 !important;
+  filter: none !important;
+  transition: opacity 0.3s ease, filter 0.3s ease !important;
+  pointer-events: auto !important;
+}
+
+/* ── Drag Handle Visual (subtle) ── */
+#pm-panel-header::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
