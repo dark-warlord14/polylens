@@ -110,6 +110,8 @@
             if (row) return row;
             var card = l.closest('.group\\/card');
             if (card) return card;
+            var aGroup = l.closest('a.group.cursor-pointer') || l.closest('a.w-full');
+            if (aGroup) return aGroup;
             var el = l;
             for (var i = 0; i < 8; i++) { // Walk up 8 levels safely
                 var p = el.parentElement;
