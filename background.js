@@ -2,7 +2,7 @@
 // Handles API pagination and implements a 1-hour local storage cache ("Local DB").
 
 var API_BASE = "https://gamma-api.polymarket.com";
-var CACHE_KEY = "polylens_market_cache";
+var CACHE_KEY = "polylens_market_cache_v2";
 var UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
 
 
@@ -17,7 +17,7 @@ function loadCache() {
 
 // Fetch a single page from the API
 function fetchPage(endpoint, offset) {
-    var url = API_BASE + endpoint + "?active=true&closed=false&limit=1000&offset=" + offset;
+    var url = API_BASE + endpoint + "?active=true&closed=false&limit=500&offset=" + offset;
     return fetch(url).then(function (r) {
         return r.ok ? r.json() : [];
     }).catch(function () {
@@ -32,8 +32,8 @@ function fetchAllPages(endpoint) {
         return fetchPage(endpoint, offset).then(function (data) {
             if (data && data.length > 0) {
                 all = all.concat(data);
-                if (data.length === 1000) {
-                    return loop(offset + 1000);
+                if (data.length >= 500) {
+                    return loop(offset + 500);
                 }
             }
             return all;

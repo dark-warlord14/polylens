@@ -111,13 +111,14 @@
             var card = l.closest('.group\\/card');
             if (card) return card;
             var el = l;
-            for (var i = 0; i < 4; i++) { // Shorter walk-up for performance
+            for (var i = 0; i < 8; i++) { // Walk up 8 levels safely
                 var p = el.parentElement;
                 if (!p || p === document.body) break;
-                if (p.className.includes('rounded') && p.className.includes('flex-col')) return p;
+                if (p.className && typeof p.className === "string" && p.className.includes("rounded") && p.className.includes("flex-col")) return p;
                 el = p;
             }
-            return el;
+            // Fallback: If we can't find a proper card container, applying dim to the tag directly is better than nothing, but we prefer 2 levels up.
+            return l.parentElement && l.parentElement.parentElement ? l.parentElement.parentElement : l;
         }
 
         var links = document.querySelectorAll('a[href^="/event/"], a[href^="/market/"]');
