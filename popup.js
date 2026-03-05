@@ -71,13 +71,9 @@ function clearFilter() {
         var el = document.getElementById(id);
         if (el) el.value = "";
     });
+    // Removing from storage will trigger the listener in ALL tabs
     chrome.storage.sync.remove("polyFilters");
     hideStatus();
-
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        if (!tabs[0]) return;
-        chrome.tabs.sendMessage(tabs[0].id, { action: "clearFilters" });
-    });
 }
 
 function buildFilters() {

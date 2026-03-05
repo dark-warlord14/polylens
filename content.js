@@ -60,6 +60,20 @@
                 applyFilterLogic();
             }
         }, 3000);
+
+        // 4. Storage Listener: Sync changes across ALL tabs simultaneously
+        chrome.storage.onChanged.addListener(function (changes, area) {
+            if (area === "sync" && changes.polyFilters) {
+                var s = changes.polyFilters.newValue;
+                if (s && s.filters) {
+                    activeFilters = s;
+                    fetchAndApply();
+                } else {
+                    activeFilters = null;
+                    document.querySelectorAll(".pm-dim").forEach(function (el) { el.classList.remove("pm-dim"); });
+                }
+            }
+        });
     }
 
     function fetchAndApply() {
