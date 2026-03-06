@@ -51,13 +51,24 @@
         <input type="number" id="input-days" class="input" placeholder="0" min="0" max="365" />
         <span class="input-unit">days</span>
       </div>
-      <div class="hint">e.g. enter 3 to see markets expiring in the next 3 days</div>
+      <div class="quick-chips">
+        <button class="chip" data-val="1">1d</button>
+        <button class="chip" data-val="3">3d</button>
+        <button class="chip" data-val="5">5d</button>
+        <button class="chip" data-val="7">7d</button>
+        <button class="chip" data-val="10">10d</button>
+      </div>
+      <div class="hint">Show markets expiring in the next X days.</div>
     </div>
 
     <!-- Exact Date -->
     <div id="section-date" class="filter-section">
       <div class="section-label">Show markets expiring on</div>
       <input type="date" id="input-date" class="input input-date" />
+      <div class="quick-chips">
+        <button class="chip chip-wide" id="chip-today">Today</button>
+        <button class="chip chip-wide" id="chip-end-month">End of Month</button>
+      </div>
     </div>
 
     <!-- Date Range -->

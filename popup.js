@@ -8,6 +8,8 @@ document.addEventListener("DOMContentLoaded", function () {
     setupTabs();
     document.getElementById("btn-apply").addEventListener("click", applyFilter);
     document.getElementById("btn-clear").addEventListener("click", clearFilter);
+    setupQuickFilters();
+    prefillDates();
 });
 
 var currentMode = "days";
@@ -23,6 +25,46 @@ function setupTabs() {
             if (section) section.classList.add("visible");
         });
     });
+}
+
+function setupQuickFilters() {
+    // Days chips
+    document.querySelectorAll(".chip[data-val]").forEach(function (chip) {
+        chip.addEventListener("click", function () {
+            document.getElementById("input-days").value = chip.getAttribute("data-val");
+            updateChips("days", chip);
+            applyFilter();
+        });
+    });
+
+    // Date chips
+    document.getElementById("chip-today").addEventListener("click", function () {
+        document.getElementById("input-date").value = new Date().toISOString().split("T")[0];
+        updateChips("date", this);
+        applyFilter();
+    });
+
+    document.getElementById("chip-end-month").addEventListener("click", function () {
+        var now = new Date();
+        var lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        document.getElementById("input-date").value = lastDay.toISOString().split("T")[0];
+        updateChips("date", this);
+        applyFilter();
+    });
+}
+
+function updateChips(context, activeChip) {
+    var parent = activeChip.parentElement;
+    parent.querySelectorAll(".chip").forEach(function (c) { c.classList.remove("active"); });
+    activeChip.classList.add("active");
+}
+
+function prefillDates() {
+    var today = new Date().toISOString().split("T")[0];
+    var startInput = document.getElementById("input-start");
+    if (!startInput.value) {
+        startInput.value = today;
+    }
 }
 
 function refreshBadge() {

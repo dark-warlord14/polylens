@@ -4,6 +4,7 @@
 
 (function () {
     if (window.__polyLensActive) return;
+    if (window.location.pathname.startsWith('/portfolio')) return;
     window.__polyLensActive = true;
 
     var marketData = {};
