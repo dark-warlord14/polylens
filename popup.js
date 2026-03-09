@@ -71,34 +71,51 @@ function prefillDates() {
 
 function refreshBadge() {
     chrome.runtime.sendMessage({ action: "getCount" }, function (res) {
-        if (chrome.runtime.lastError || !res) return;
+        if (chrome.runtime.lastError || !res) {
+            var b = document.getElementById("api-badge");
+            var t = document.getElementById("api-badge-text");
+            b.className = "badge badge-error";
+            t.textContent = "Sync required";
+            return;
+        }
         var b = document.getElementById("api-badge");
         var t = document.getElementById("api-badge-text");
         if (res.count > 0) {
             b.className = "badge badge-ok";
-            t.textContent = res.count + " markets synced";
+            t.textContent = res.count.toLocaleString() + " markets synced";
+        } else {
+            b.className = "badge badge-loading";
+            t.textContent = "Scanning markets...";
         }
     });
 }
 
 function applyFilter() {
     var filters = buildFilters();
-    if (!filters) return;
+    if (!filters && currentMode !== "deals") return;
 
     var payload = { mode: currentMode, filters: filters };
     chrome.storage.sync.set({ polyFilters: payload }, function () {
         console.log("Filters saved to storage.");
     });
 
+    if (currentMode === "deals") {
+        // Deals mode doesn't apply content filters, it just directs to dashboard
+        return;
+    }
+
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        if (!tabs[0]) return;
+        if (!tabs[0] || !tabs[0].url || !tabs[0].url.includes("polymarket.com")) {
+            showStatus("Open Polymarket to apply filters", "error");
+            return;
+        }
         chrome.tabs.sendMessage(tabs[0].id, {
             action: "applyFilters",
             mode: currentMode,
             filters: filters
         }, function (response) {
             if (chrome.runtime.lastError) {
-                showStatus("Refresh page to activate filter", "error");
+                showStatus("Refresh Polymarket to activate", "error");
                 return;
             }
             if (response) {
@@ -114,6 +131,12 @@ function clearFilter() {
         if (el) el.value = "";
     });
     chrome.storage.sync.remove("polyFilters");
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        if (tabs[0]) {
+            chrome.tabs.sendMessage(tabs[0].id, { action: "clearFilters" }).catch(() => {});
+        }
+    });
     hideStatus();
 }
 

@@ -103,7 +103,10 @@
     }
 
     function applyFilterLogic() {
-        if (!activeFilters || !activeFilters.filters) return;
+        if (!activeFilters || !activeFilters.filters) {
+            document.querySelectorAll(".pm-dim").forEach(function (el) { el.classList.remove("pm-dim"); });
+            return;
+        }
 
         var mode = activeFilters.mode;
         var f = activeFilters.filters;
@@ -126,17 +129,23 @@
             for (var i = 0; i < 8; i++) {
                 var p = el.parentElement;
                 if (!p || p === document.body) break;
-                if (p.className && typeof p.className === "string" && p.className.includes("rounded") && p.className.includes("flex-col")) return p;
+                var className = (p.className && typeof p.className === "string") ? p.className : "";
+                if (className.includes("rounded") && className.includes("flex-col")) return p;
                 el = p;
             }
             return l.parentElement && l.parentElement.parentElement ? l.parentElement.parentElement : l;
         }
 
         var links = document.querySelectorAll('a[href^="/event/"], a[href^="/market/"]');
+        var processedRoots = new Set();
+        var visibleCount = 0;
+        var totalCount = 0;
 
         links.forEach(function (link) {
             var card = findCardRoot(link);
-            if (!card) return;
+            if (!card || processedRoots.has(card)) return;
+            processedRoots.add(card);
+            totalCount++;
 
             var fullSlug = getFullSlug(link.getAttribute("href"));
             var baseSlug = fullSlug ? fullSlug.split('/')[0] : null;
@@ -168,12 +177,22 @@
                     show = (expiry >= start && expiry <= end);
                 }
             } else {
-                show = false;
+                // If we don't have data, we might want to hide it to be safe or show it.
+                // Polymarket sometimes has complex nested slugs.
+                // For now, let's keep it visible if we don't know better, 
+                // but if filters are active, maybe we should be stricter.
+                show = !activeFilters; 
             }
 
-            if (show) card.classList.remove("pm-dim");
-            else card.classList.add("pm-dim");
+            if (show) {
+                card.classList.remove("pm-dim");
+                visibleCount++;
+            } else {
+                card.classList.add("pm-dim");
+            }
         });
+
+        return { visible: visibleCount, total: totalCount };
     }
 
     function injectStyles() {
@@ -193,10 +212,8 @@
         } else if (msg.action === "applyFilters") {
             activeFilters = { mode: msg.mode, filters: msg.filters };
             marketData = Object.assign({}, marketData, scanNextData());
-            applyFilterLogic();
-            var vis = document.querySelectorAll('a[href^="/event/"]:not(.pm-dim), a[href^="/market/"]:not(.pm-dim)').length;
-            var tot = document.querySelectorAll('a[href^="/event/"], a[href^="/market/"]').length;
-            sendResponse({ visible: Math.ceil(vis / 2), total: Math.ceil(tot / 2) });
+            var counts = applyFilterLogic();
+            sendResponse(counts);
         } else if (msg.action === "clearFilters") {
             activeFilters = null;
             document.querySelectorAll(".pm-dim").forEach(function (el) { el.classList.remove("pm-dim"); });

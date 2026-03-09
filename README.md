@@ -1,16 +1,29 @@
-# PolyLens
+# PolyLens Elite
 
-**PolyLens** is a Chrome extension that allows you to effortlessly filter trades and events on [Polymarket.com](https://polymarket.com) based on their expiry date.
+**PolyLens Elite** is a professional-grade Chrome extension for Polymarket power users. It provides advanced expiry filtering directly on the Polymarket UI and a dedicated "Alpha Discovery" dashboard for institutional-grade arbitrage and yield hunting.
 
-## 🚀 Features
+## 🚀 Key Features
 
--   **Filter by Days to Expiry**: Quickly see markets expiring in the next 1, 2, or X days. (Setting to `0` shows markets expiring today).
--   **Filter by Exact Date**: Target a specific date for your trades.
--   **Filter by Date Range**: View all markets expiring within a custom window.
--   **Intelligent Row-Level Filtering**: Works on both grid layouts and "Multi-Market" row views (like Paradex launch events).
--   **Auto-Hides Closed Bets**: Automatically dims markets that are already resolved or closed.
--   **Persistent Settings**: Your filters stay active even after you refresh the page or restart your browser.
--   **Real-Time Updates**: Automatically filters new content as you scroll down (infinite scroll support).
+### 1. In-Page Expiry Filtering
+- **Dynamic Content Injection**: Automatically dims markets on Polymarket.com that don't match your criteria.
+- **Three Filtering Modes**:
+    - **Days Left**: Show markets expiring within X days.
+    - **Exact Date**: Target specific resolution dates (e.g., today, end of month).
+    - **Date Range**: Filter for custom windows (e.g., Q4 2024).
+- **Intelligent Detection**: Works across all Polymarket layouts (Grid, List, and Event pages).
+- **Auto-Sync**: Automatically keeps market data fresh via background synchronization.
+
+### 2. Alpha Discovery Dashboard (Elite Mode)
+- **Deep Market Scan**: Background engine crawls up to 50,000+ active markets across the entire Polymarket ecosystem.
+- **Institutional ROI Filters**: Find high-probability deals (70%+) with professional liquidity floors.
+- **Order Book Depth Analysis**: Real-time integration with the Polymarket CLOB to calculate:
+    - **Effective ROI**: Adjusted for slippage on a standard $1,000 trade.
+    - **Liquidity Depth**: Instant verification of sell-side depth before you click.
+- **Categorization**: Automated tagging for Politics, Crypto, Sports, and more.
+
+### 3. Alpha Alerts
+- **Background Scanning**: Periodic market analysis every 15 minutes.
+- **Push Notifications**: Get notified instantly when a "Truly New" institutional-grade opportunity (3%+ ROI, 85%+ Probability, $25k+ Volume) is detected.
 
 ## 🛠️ Installation
 
@@ -20,12 +33,13 @@
 4.  Click **Load unpacked** and select the extension folder.
 5.  Pin the extension to your toolbar for easy access.
 
-## ⚙️ How It Works
+## ⚙️ Technical Architecture
 
--   **Data Sync**: The extension fetches accurate metadata from the Polymarket Gamma API and the page's internal state.
--   **Privacy**: All filtering happens locally on your machine.
--   **UX**: Instead of hiding markets entirely, non-matching markets are "dimmed" and made non-clickable. This keeps the page layout intact while helping you focus on your active trades.
+- **Background Engine**: A robust service worker (`background.js`) handles pagination-aware API polling (100-market pages) and persistent storage in `chrome.storage.local`.
+- **Content Script**: Optimized `MutationObserver` (`content.js`) ensures zero performance lag while filtering thousands of DOM elements.
+- **CLOB Integration**: Direct WebSocket/REST communication with `clob.polymarket.com` for real-time order book snapshots.
+- **Privacy**: All calculations and filtering happen locally on your machine.
 
 ## 📄 License
 
-MIT. Created by Antigravity for Polymarket enthusiasts.
+MIT. Created for Polymarket power users.

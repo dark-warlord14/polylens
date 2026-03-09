@@ -42,6 +42,7 @@
   "host_permissions": [
     "https://polymarket.com/*",
     "https://*.polymarket.com/*",
-    "https://gamma-api.polymarket.com/*"
+    "https://gamma-api.polymarket.com/*",
+    "https://clob.polymarket.com/*"
   ]
 }

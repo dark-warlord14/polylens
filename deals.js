@@ -1,138 +1,142 @@
 /**
- * deals.js - PolyLens Pro Dashboard Controller
- * Features: Flash Load from Cache, Real-time CLOB Depth, Adaptive ROI.
+ * deals.js - PolyLens Elite Controller
+ * Manages the institutional dashboard, real-time filtering, and order book depth.
  */
 
-const CACHE_KEY = "polylens_pro_cache";
+let allDeals = [];
+let currentCategory = "all";
 
 document.addEventListener("DOMContentLoaded", () => {
-    init();
+    initDashboard();
+    setupEventListeners();
 });
 
-let currentSort = 'roi';
-let dealsInView = [];
+async function initDashboard() {
+    // Show skeletons initially
+    renderSkeletons();
 
-function init() {
-    setupEventListeners();
-    loadFromCache(); // "Flash Load"
-}
+    // Load data from storage
+    const storage = await chrome.storage.local.get(["polylens_pro_cache"]);
+    const cache = storage["polylens_pro_cache"];
 
-function setupEventListeners() {
-    document.getElementById("refresh-btn").addEventListener("click", manualSync);
-
-    document.querySelectorAll(".sort-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-            document.querySelectorAll(".sort-btn").forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-            currentSort = btn.dataset.sort;
-            renderDeals();
-        });
-    });
-
-    ["filter-days", "filter-prob", "filter-min-volume", "hide-low-liq", "filter-trade-size"].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener("change", () => renderDeals());
-    });
-}
-
-/**
- * Loads data instantly from chrome.storage.local
- */
-async function loadFromCache() {
-    const res = await chrome.storage.local.get([CACHE_KEY]);
-    if (res[CACHE_KEY]) {
-        const cache = res[CACHE_KEY];
-        document.getElementById("stat-scanned").textContent = cache.count || 0;
-        document.getElementById("last-sync-time").textContent = `(Synced ${formatTime(cache.timestamp)})`;
-        renderDeals(cache.deals);
+    if (cache && cache.deals) {
+        allDeals = cache.deals;
+        updateStats(cache.count, allDeals.length);
+        populateCategories(allDeals);
+        applyFilters();
     } else {
+        // First time users
         manualSync();
     }
 }
 
-function formatTime(ts) {
-    const diff = Math.floor((Date.now() - ts) / 1000 / 60);
-    if (diff < 1) return "just now";
-    return `${diff}m ago`;
+function setupEventListeners() {
+    // Live Filtering
+    const filterInputs = ["min-volume", "max-days", "min-prob", "sort-by", "depth-toggle"];
+    filterInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("input", applyFilters);
+    });
+
+    document.getElementById("refresh-btn").addEventListener("click", manualSync);
 }
 
-async function manualSync() {
-    const btn = document.getElementById("refresh-btn");
-    btn.disabled = true;
-    btn.textContent = "Syncing Engine...";
+function renderSkeletons() {
+    const grid = document.getElementById("deals-grid");
+    grid.innerHTML = '<div class="skeleton-card"></div>'.repeat(6);
+}
 
-    // Send message to background script to perform a fresh scan
-    chrome.runtime.sendMessage({ action: "manualSync" }, (response) => {
-        btn.disabled = false;
-        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path></svg> Refresh Dashboard`;
-        loadFromCache();
+function updateStats(scanned, found) {
+    document.getElementById("stat-scanned").textContent = scanned.toLocaleString();
+    document.getElementById("stat-deals").textContent = found;
+
+    // Update title based on pipeline status
+    const title = document.getElementById("results-title");
+    title.textContent = found > 0 ? "Institutional Pipeline Active" : "Scanning Market Depth...";
+}
+
+function populateCategories(deals) {
+    const catContainer = document.getElementById("category-filters");
+    const categories = ["all", ...new Set(deals.map(d => d.category))];
+
+    // Preserve "all" chip
+    catContainer.innerHTML = '<button class="cat-chip active" data-category="all">All Markets</button>';
+
+    categories.forEach(cat => {
+        if (cat === "all") return;
+        const btn = document.createElement("button");
+        btn.className = "cat-chip";
+        btn.dataset.category = cat;
+        btn.textContent = cat;
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".cat-chip").forEach(c => c.classList.remove("active"));
+            btn.classList.add("active");
+            currentCategory = cat;
+            applyFilters();
+        });
+        catContainer.appendChild(btn);
     });
 }
 
-function renderDeals(inputDeals) {
+function applyFilters() {
+    const minVol = parseFloat(document.getElementById("min-volume").value) || 0;
+    const maxDays = parseFloat(document.getElementById("max-days").value) || 999;
+    const minProb = parseFloat(document.getElementById("min-prob").value) || 0;
+    const sortBy = document.getElementById("sort-by").value;
+    const showDepth = document.getElementById("depth-toggle").checked;
+
+    let filtered = allDeals.filter(d => {
+        const catMatch = currentCategory === "all" || d.category === currentCategory;
+        const volMatch = d.volume >= minVol;
+        const daysMatch = d.daysLeft <= maxDays;
+        const probMatch = d.probability >= minProb;
+        return catMatch && volMatch && daysMatch && probMatch;
+    });
+
+    // Sorting Logic
+    if (sortBy === "roi") filtered.sort((a, b) => b.roi - a.roi);
+    else if (sortBy === "volume") filtered.sort((a, b) => b.volume - a.volume);
+    else if (sortBy === "days") filtered.sort((a, b) => a.daysLeft - b.daysLeft);
+
+    renderDeals(filtered, showDepth);
+}
+
+function renderDeals(deals, showDepth) {
     const grid = document.getElementById("deals-grid");
     const empty = document.getElementById("empty-state");
-    const daysLimit = parseInt(document.getElementById("filter-days").value, 10);
-    const probLimit = parseInt(document.getElementById("filter-prob").value, 10) / 100;
-    const minVol = parseInt(document.getElementById("filter-min-volume").value, 10);
-    const hideLowLiq = document.getElementById("hide-low-liq").checked;
-    const tradeSize = parseInt(document.getElementById("filter-trade-size").value, 10);
-
-    // Use inputDeals or the global state
-    if (inputDeals) dealsInView = inputDeals;
-
-    // Filter Logic
-    let filtered = dealsInView.filter(d => {
-        // Validation with defaults in case UI is inconsistent
-        const days = daysLimit || 7;
-        const prob = probLimit || 0.8;
-        const minV = minVol || 0;
-
-        if (d.daysLeft > days) return false;
-        if (d.volume < minV) return false;
-
-        // Reliability check (probability is stored as e.g. "85.0")
-        const currentProb = parseFloat(d.probability) / 100;
-        if (currentProb < prob) return false;
-
-        // Liquidity labeling
-        d.liqClass = d.volume > 50000 ? "high" : d.volume > 10000 ? "mid" : "low";
-        if (hideLowLiq && d.liqClass === "low") return false;
-
-        return true;
-    });
-
-    // Sort Logic
-    if (currentSort === 'roi') filtered.sort((a, b) => b.roi - a.roi);
-    else if (currentSort === 'volume') filtered.sort((a, b) => b.volume - a.volume);
-    else if (currentSort === 'expiry') filtered.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
 
     grid.innerHTML = "";
-    document.getElementById("stat-deals").textContent = filtered.length;
-    document.getElementById("results-title").textContent = filtered.length > 0 ? "Institutional Pipeline Active" : "No Alpha Found";
+    document.getElementById("stat-deals").textContent = deals.length;
 
-    if (filtered.length === 0) {
+    if (deals.length === 0) {
         empty.classList.remove("hidden");
         return;
     }
+    empty.classList.add("hidden");
 
-    filtered.forEach(deal => {
+    deals.forEach(deal => {
         const card = document.createElement("div");
         card.className = "deal-card";
-        const volStr = deal.volume >= 1e6 ? (deal.volume / 1e6).toFixed(1) + "M" : deal.volume >= 1e3 ? (deal.volume / 1e3).toFixed(1) + "K" : deal.volume;
+
+        // Liquidity Class
+        let liqClass = "low";
+        if (deal.volume >= 500000) liqClass = "high";
+        else if (deal.volume >= 100000) liqClass = "mid";
+
+        const shortVol = deal.volume >= 1e6 ? (deal.volume / 1e6).toFixed(1) + "M" : (deal.volume / 1e3).toFixed(1) + "K";
 
         card.innerHTML = `
             <div class="deal-header">
                 <div>
-                    <span class="category-tag">TRADABLE</span>
-                    <span class="liquidity-badge ${deal.liqClass}">${deal.liqClass.toUpperCase()} LIQ</span>
+                    <span class="category-tag">${deal.category.toUpperCase()}</span>
+                    <span class="liquidity-badge ${liqClass}">${liqClass.toUpperCase()} LIQ</span>
                 </div>
-                <span class="expiry-tag">${deal.daysLeft}d left</span>
+                <span class="expiry-tag">${deal.daysLeft}d to expiry</span>
             </div>
             <h3 class="deal-question">${deal.title}</h3>
             <div class="deal-metrics">
                 <div class="metric-box">
-                    <span class="metric-label">Projected ROI</span>
+                    <span class="metric-label">Projected Yield</span>
                     <span class="metric-value roi">+${deal.roi}%</span>
                 </div>
                 <div class="metric-box">
@@ -142,28 +146,26 @@ function renderDeals(inputDeals) {
             </div>
             <div class="outcome-row">
                 <span class="outcome-name">${deal.outcome}</span>
-                <span class="outcome-vol">$${volStr} Vol</span>
+                <span class="outcome-vol">$${shortVol} Volume</span>
             </div>
-            <div id="depth-${deal.slug}" class="depth-info">
-                <span class="metric-label">Analyzing Book Depth...</span>
-            </div>
-            <a href="https://polymarket.com/market/${deal.slug}" target="_blank" class="deal-link-btn">Lock in Profit →</a>
+            ${showDepth ? `<div id="depth-${deal.slug}" class="depth-info">Analyzing Order Book Depth...</div>` : ""}
+            <a href="https://polymarket.com/market/${deal.slug}" target="_blank" class="deal-link-btn">Lock in Alpha →</a>
         `;
         grid.appendChild(card);
 
-        // Trigger async order book analysis
-        fetchDepth(deal.slug, deal.outcomeIdx, tradeSize);
+        if (showDepth) fetchDepth(deal.slug, deal.outcomeIdx);
     });
 }
 
 /**
- * Fetches real-time CLOB depth for a specific token
- * and calculates executable ROI for the target trade size.
+ * Institutional Depth Analysis Integration
  */
-async function fetchDepth(slug, outcomeIdx, tradeSize) {
+async function fetchDepth(slug, outcomeIdx) {
+    const tradeSize = 1000; // Fixed standard size
     const depthEl = document.getElementById(`depth-${slug}`);
+    if (!depthEl) return;
+
     try {
-        // First get the market to find the token IDs (this is public)
         const mRes = await fetch(`https://gamma-api.polymarket.com/markets?slug=${slug}`);
         const mData = await mRes.json();
         if (!mData || !mData[0] || !mData[0].clobTokenIds) return;
@@ -171,52 +173,50 @@ async function fetchDepth(slug, outcomeIdx, tradeSize) {
         const tokenIds = JSON.parse(mData[0].clobTokenIds);
         const tokenId = tokenIds[outcomeIdx];
 
-        // Now fetch the actual order book from CLOB (Slippage check)
         const bRes = await fetch(`https://clob.polymarket.com/book?token_id=${tokenId}`);
         const book = await bRes.json();
 
         if (!book || !book.asks || book.asks.length === 0) {
-            depthEl.innerHTML = `<span class="metric-label" style="color:#ef4444">No Sell Liquidity Found</span>`;
+            depthEl.innerHTML = '<span style="color:#EF4444">No Sell Liquidity Available</span>';
             return;
         }
 
-        // Calculate slippage for target trade size
-        let cost = 0;
-        let shares = 0;
-        let fulfilled = false;
-
+        let cost = 0, shares = 0, fulfilled = false;
         for (const ask of book.asks) {
             const price = parseFloat(ask.price);
             const size = parseFloat(ask.size);
             const remaining = tradeSize - cost;
             const take = Math.min(size * price, remaining);
-
             cost += take;
             shares += take / price;
-
-            if (cost >= tradeSize) {
-                fulfilled = true;
-                break;
-            }
+            if (cost >= tradeSize) { fulfilled = true; break; }
         }
 
         if (fulfilled) {
             const avgPrice = cost / shares;
             const effectiveRoi = ((1 - avgPrice) / avgPrice) * 100;
             const slippage = (avgPrice - parseFloat(book.asks[0].price)) / parseFloat(book.asks[0].price) * 100;
-
-            depthEl.innerHTML = `
-                <div style="display:flex; justify-content:space-between; margin-top:8px; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
-                    <span class="metric-label">Adjusted ROI ($${tradeSize}): <b style="color:#10b981">+${effectiveRoi.toFixed(2)}%</b></span>
-                    <span class="metric-label">Slippage: <b style="color:${slippage > 1 ? '#ef4444' : '#94a3b8'}">${slippage.toFixed(2)}%</b></span>
-                </div>
-            `;
+            depthEl.innerHTML = `Adj. ROI ($${tradeSize}): <b style="color:#10B981">+${effectiveRoi.toFixed(2)}%</b> | Slippage: <b style="color:${slippage > 1 ? '#EF4444' : '#7B8996'}">${slippage.toFixed(2)}%</b>`;
         } else {
-            const maxLiq = cost.toFixed(0);
-            depthEl.innerHTML = `<span class="metric-label" style="color:#f59e0b">Limited Depth: Only $${maxLiq} available</span>`;
+            depthEl.innerHTML = `<span style="color:#f59e0b">Insufficient Depth: Max $${cost.toFixed(0)} available</span>`;
         }
-
     } catch (e) {
-        depthEl.innerHTML = `<span class="metric-label">Depth data unavailable</span>`;
+        depthEl.textContent = "Book analysis timed out";
     }
+}
+
+async function manualSync() {
+    const btn = document.getElementById("refresh-btn");
+    const status = document.getElementById("sync-status");
+
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> Executing Deep Scan...';
+    status.textContent = "Crawling 4,000+ Markets. Please wait...";
+
+    chrome.runtime.sendMessage({ action: "manualSync" }, (res) => {
+        setTimeout(initDashboard, 500); // Small grace for storage write
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg> Run Full Spectrum Scan';
+        status.textContent = "Pipeline Synchronized.";
+    });
 }
