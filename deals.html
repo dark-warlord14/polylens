@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyLens | ROI Deals Dashboard</title>
+    <link rel="stylesheet" href="deals.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="dashboard">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="logo-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 4.5h18M6 9.5h12M9 14.5h6M11 19.5h2" stroke="white" stroke-width="3"
+                            stroke-linecap="round" />
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>PolyLens</h1>
+                    <span>Alpha ROI Deals</span>
+                </div>
+            </div>
+
+            <nav class="filters">
+                <div class="filter-group">
+                    <label>Discovery Parameters</label>
+                    <div class="input-card">
+                        <span class="label">Expiring within</span>
+                        <div class="input-row">
+                            <input type="number" id="filter-days" value="1" min="1" max="30">
+                            <span class="unit">Days</span>
+                        </div>
+                    </div>
+                    <div class="input-card">
+                        <span class="label">Min. Probability</span>
+                        <div class="input-row">
+                            <input type="number" id="filter-prob" value="80" min="50" max="99">
+                            <span class="unit">%</span>
+                        </div>
+                    </div>
+                    <div class="input-card">
+                        <span class="label">Target Trade Size</span>
+                        <div class="input-row">
+                            <span class="unit">$</span>
+                            <input type="number" id="filter-trade-size" value="1000" min="10" max="100000">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-group">
+                    <label>Sort By</label>
+                    <div class="sort-options">
+                        <button class="sort-btn active" data-sort="roi">Highest ROI</button>
+                        <button class="sort-btn" data-sort="volume">Highest Volume</button>
+                        <button class="sort-btn" data-sort="expiry">Closing Soon</button>
+                    </div>
+                </div>
+
+                <div class="filter-group">
+                    <label>Liquidity Requirements</label>
+                    <div class="select-wrapper">
+                        <select id="filter-min-volume" class="select-input">
+                            <option value="0">Show All Markets</option>
+                            <option value="1000" selected>$1,000 Min Volume</option>
+                            <option value="10000">$10,000 Min Volume</option>
+                            <option value="50000">$50,000 Min Volume</option>
+                            <option value="100000">$100,000+ Institutional</option>
+                        </select>
+                    </div>
+                    <div class="toggle-row">
+                        <span>Hide Low Liquidity</span>
+                        <label class="switch">
+                            <input type="checkbox" id="hide-low-liq" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="filter-group">
+                    <label>Discovery Depth</label>
+                    <div class="status-box">
+                        <div class="status-label">Total Scan Range</div>
+                        <div class="status-value" id="scan-range-text">All Markets (Infinite)</div>
+                    </div>
+                </div>
+
+                <button id="refresh-btn" class="btn-refresh">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15">
+                        </path>
+                    </svg>
+                    Refresh Dashboard
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div id="progress-container" class="progress-wrapper hidden">
+                    <div class="progress-info">
+                        <span>Scanning Database...</span>
+                        <span id="progress-percent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="status-indicator">
+                    <span class="dot"></span>
+                    <span id="sync-status">Live Market Data</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="search-info">
+                    <h2 id="results-title">Finding Best ROI Deals...</h2>
+                    <p id="results-subtitle">Analyzing Polymarket order books for stable alpha. <span
+                            id="last-sync-time" class="text-dim"></span></p>
+                </div>
+                <div class="stats-row">
+                    <div class="stat-pill">
+                        <span class="stat-label">Markets Scanned</span>
+                        <span id="stat-scanned" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-pill">
+                        <span class="stat-label">Deals Found</span>
+                        <span id="stat-deals" class="stat-value primary">0</span>
+                    </div>
+                </div>
+            </header>
+
+            <div id="deals-grid" class="deals-grid">
+                <!-- Skeleton Loading State -->
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+                <div class="skeleton-card"></div>
+            </div>
+
+            <div id="empty-state" class="empty-state hidden">
+                <div class="empty-icon">📂</div>
+                <h3>No arbitrage deals found</h3>
+                <p>Try widening your probability range or extending the expiration window.</p>
+            </div>
+        </main>
+    </div>
+
+    <script src="deals.js"></script>
+</body>
+
+</html>

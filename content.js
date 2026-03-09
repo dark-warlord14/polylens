@@ -11,10 +11,6 @@
     var activeFilters = null;
     var debounceTimer;
 
-    // Use a WeakMap to track which roots we have already processed/bound
-    // This prevents re-processing the same elements during mutations.
-    var processedRoots = new WeakSet();
-
     function init() {
         injectStyles();
 
@@ -38,7 +34,6 @@
                     break;
                 }
                 if (m.type === "attributes" && m.attributeName === "class") {
-                    // Trigger if a class changed on an element (React might have stripped pm-dim)
                     var targetClass = (m.target && m.target.className) ? m.target.className : "";
                     if (typeof targetClass === "string" && !targetClass.includes("pm-dim")) {
                         needsUpdate = true;
@@ -55,14 +50,14 @@
 
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
 
-        // 3. Periodic safety pulse to catch any missed React state rewrites
+        // 3. Periodic safety pulse
         setInterval(function () {
             if (activeFilters) {
                 applyFilterLogic();
             }
         }, 3000);
 
-        // 4. Storage Listener: Sync changes across ALL tabs simultaneously
+        // 4. Storage Listener: Sync changes across tabs
         chrome.storage.onChanged.addListener(function (changes, area) {
             if (area === "sync" && changes.polyFilters) {
                 var s = changes.polyFilters.newValue;
@@ -128,13 +123,12 @@
             var aGroup = l.closest('a.group.cursor-pointer') || l.closest('a.w-full');
             if (aGroup) return aGroup;
             var el = l;
-            for (var i = 0; i < 8; i++) { // Walk up 8 levels safely
+            for (var i = 0; i < 8; i++) {
                 var p = el.parentElement;
                 if (!p || p === document.body) break;
                 if (p.className && typeof p.className === "string" && p.className.includes("rounded") && p.className.includes("flex-col")) return p;
                 el = p;
             }
-            // Fallback: If we can't find a proper card container, applying dim to the tag directly is better than nothing, but we prefer 2 levels up.
             return l.parentElement && l.parentElement.parentElement ? l.parentElement.parentElement : l;
         }
 
@@ -179,9 +173,6 @@
 
             if (show) card.classList.remove("pm-dim");
             else card.classList.add("pm-dim");
-
-            // Note: We don't skip processing entirely because a filter change 
-            // might happen, but the DOM scan itself is faster now.
         });
     }
 
@@ -196,13 +187,11 @@
     chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         if (msg.action === "syncComplete") {
             if (msg.data) {
-                // Background sync finished, merge new data and re-apply
                 marketData = Object.assign({}, marketData, msg.data, scanNextData());
                 applyFilterLogic();
             }
         } else if (msg.action === "applyFilters") {
             activeFilters = { mode: msg.mode, filters: msg.filters };
-            // Force a re-scan of page data and apply
             marketData = Object.assign({}, marketData, scanNextData());
             applyFilterLogic();
             var vis = document.querySelectorAll('a[href^="/event/"]:not(.pm-dim), a[href^="/market/"]:not(.pm-dim)').length;

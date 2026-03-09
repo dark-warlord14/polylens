@@ -1,122 +1,168 @@
-// background.js — Production-grade background script for PolyLens.
-// Handles API pagination and implements a 1-hour local storage cache ("Local DB").
+/**
+ * background.js - PolyLens Professional Background Engine
+ * Handles persistent cache (chrome.storage.local), background scanning (alarms),
+ * and Alpha Alerts (notifications).
+ */
 
-var API_BASE = "https://gamma-api.polymarket.com";
-var CACHE_KEY = "polylens_market_cache_v2";
-var UPDATE_INTERVAL = 60 * 60 * 1000; // 1 hour
+const CACHE_KEY = "polylens_pro_cache";
+const SCAN_ALARM = "polylens_scan_alarm";
+const NOTIF_PREFIX = "polylens_deal_";
 
+chrome.runtime.onInstalled.addListener(() => {
+    console.log("PolyLens Pro: Engine Initialized");
+    setupAlarms();
+    performBackgroundScan();
+});
 
-// Load initial cache from local storage on startup
-function loadCache() {
-    return new Promise(function (resolve) {
-        chrome.storage.local.get([CACHE_KEY], function (res) {
-            resolve(res[CACHE_KEY] || { data: {}, lastUpdate: 0 });
-        });
-    });
-}
-
-// Fetch a single page from the API
-function fetchPage(endpoint, offset) {
-    var url = API_BASE + endpoint + "?active=true&closed=false&limit=500&offset=" + offset;
-    return fetch(url).then(function (r) {
-        return r.ok ? r.json() : [];
-    }).catch(function () {
-        return [];
-    });
-}
-
-// Fetch all pages for an endpoint
-function fetchAllPages(endpoint) {
-    var all = [];
-    function loop(offset) {
-        return fetchPage(endpoint, offset).then(function (data) {
-            if (data && data.length > 0) {
-                all = all.concat(data);
-                if (data.length >= 500) {
-                    return loop(offset + 500);
-                }
-            }
-            return all;
-        });
-    }
-    return loop(0);
-}
-
-var syncPromise = null;
-
-// Perform a full sync of all events and markets
-function performSync() {
-    if (syncPromise) return syncPromise;
-
-    console.log("PolyLens BG: Starting full production-grade sync...");
-
-    syncPromise = Promise.all([
-        fetchAllPages("/events"),
-        fetchAllPages("/markets")
-    ]).then(function (results) {
-        var raw = {};
-        results[0].forEach(function (e) { if (e.slug && (e.endDate || e.resolutionDate)) raw[e.slug] = { endDate: e.endDate || e.resolutionDate, closed: !!(e.closed || e.resolved) }; });
-        results[1].forEach(function (m) { if (m.slug && (m.endDate || m.resolutionDate)) raw[m.slug] = { endDate: m.endDate || m.resolutionDate, closed: !!(m.closed || m.resolved) }; });
-
-        var cacheObj = {
-            data: raw,
-            lastUpdate: Date.now()
-        };
-
-        return new Promise(function (resolve) {
-            chrome.storage.local.set({ [CACHE_KEY]: cacheObj }, function () {
-                syncPromise = null;
-                console.log("PolyLens BG: Sync complete. Cached " + Object.keys(raw).length + " markets to local DB.");
-
-                // Broadcast new data to all active tabs
-                chrome.tabs.query({ url: ["*://*.polymarket.com/*"] }, function (tabs) {
-                    tabs.forEach(function (tab) {
-                        try {
-                            chrome.tabs.sendMessage(tab.id, { action: "syncComplete", data: raw }).catch(function () { });
-                        } catch (e) { }
-                    });
-                });
-
-                resolve(cacheObj);
-            });
-        });
-    }).catch(function (err) {
-        syncPromise = null;
-        console.error("PolyLens BG: Sync failed", err);
-        throw err;
-    });
-
-    return syncPromise;
-}
-
-// Get data, syncing only if 1 hour has passed
-function getOrSync() {
-    return loadCache().then(function (cache) {
-        var now = Date.now();
-        if (now - cache.lastUpdate > UPDATE_INTERVAL || Object.keys(cache.data).length === 0) {
-            return performSync();
+// Alarm Listener for Background Polling (with robust context handling)
+chrome.alarms.onAlarm.addListener((alarm) => {
+    try {
+        if (alarm.name === SCAN_ALARM) {
+            console.log("PolyLens Pro: Executing scheduled background scan...");
+            performBackgroundScan();
         }
-        return cache;
-    });
-}
-
-chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-    if (msg.action === "getMarkets") {
-        getOrSync().then(function (cache) {
-            sendResponse({ data: cache.data });
-        }).catch(function () {
-            // Fallback to stale cache if sync fails
-            loadCache().then(function (cache) { sendResponse({ data: cache.data }); });
-        });
-        return true;
-    }
-    if (msg.action === "getCount") {
-        loadCache().then(function (cache) {
-            sendResponse({ count: Object.keys(cache.data).length });
-        });
-        return true;
+    } catch (e) {
+        console.error("PolyLens Pro: Context error in background listener", e);
     }
 });
 
-// Pre-warm on startup
-getOrSync();
+function setupAlarms() {
+    // Schedule a scan every 15 minutes
+    chrome.alarms.create(SCAN_ALARM, { periodInMinutes: 15 });
+}
+
+/**
+ * Performs a full spectrum scan of all available markets.
+ * Syncs the results to storage.local for dashboard use.
+ */
+async function performBackgroundScan() {
+    try {
+        const markets = await fetchAllMarkets();
+        const now = Date.now();
+
+        // Load existing cache to detect NEW alpha deals
+        const existing = await chrome.storage.local.get([CACHE_KEY]);
+        const oldDeals = existing[CACHE_KEY]?.deals || [];
+        const oldIds = new Set(oldDeals.map(d => d.slug + d.outcome));
+
+        // Process found deals
+        const result = processMarketsIntoDeals(markets);
+
+        // Cache the latest results
+        await chrome.storage.local.set({
+            [CACHE_KEY]: {
+                timestamp: now,
+                count: markets.length,
+                deals: result.deals
+            }
+        });
+
+        console.log(`PolyLens Pro: Sync Complete. ${result.deals.length} active alpha deals cached.`);
+
+        // Trigger notifications for TRULY new institutional grade deals
+        const newAlpha = result.deals.filter(d =>
+            !oldIds.has(d.slug + d.outcome) &&
+            d.roi >= 3 &&
+            d.probability >= 85 &&
+            d.volume >= 25000 // Professional floor for alerts
+        );
+
+        if (newAlpha.length > 0) {
+            triggerAlphaAlert(newAlpha[0]); // Notify only the top one to avoid spam
+        }
+
+    } catch (e) {
+        console.error("PolyLens Pro: Background Scan Failed", e);
+    }
+}
+
+async function fetchAllMarkets() {
+    const pageSize = 500;
+    let offset = 0;
+    let all = [];
+    let hasMore = true;
+
+    while (hasMore) {
+        const url = `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=${pageSize}&offset=${offset}&order=volume&dir=desc`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data && data.length > 0) {
+            all = all.concat(data);
+            offset += data.length;
+            if (data.length < pageSize) hasMore = false;
+        } else {
+            hasMore = false;
+        }
+        await new Promise(r => setTimeout(r, 200));
+    }
+    return all;
+}
+
+function processMarketsIntoDeals(markets) {
+    const deals = [];
+    const now = new Date();
+
+    markets.forEach(m => {
+        if (!m.endDate || !m.outcomePrices || !m.outcomes) return;
+
+        const volume = parseFloat(m.volume || 0);
+        const expiry = new Date(m.endDate);
+        const diffDays = (expiry - now) / (1000 * 60 * 60 * 24);
+
+        if (diffDays <= 0 || diffDays > 7) return; // Background focus on short-term alpha
+
+        let prices = m.outcomePrices;
+        let outcomes = m.outcomes;
+        if (typeof prices === "string") { try { prices = JSON.parse(prices); } catch (e) { return; } }
+        if (typeof outcomes === "string") { try { outcomes = JSON.parse(outcomes); } catch (e) { return; } }
+
+        if (!Array.isArray(prices) || !Array.isArray(outcomes)) return;
+
+        prices.forEach((p, idx) => {
+            const prob = parseFloat(p);
+            // Institutional floor is 70% reliability for background tracking
+            if (!isNaN(prob) && prob >= 0.70 && prob < 0.999) {
+                const roi = ((1 - prob) / prob) * 100;
+                deals.push({
+                    title: m.question,
+                    outcome: outcomes[idx],
+                    probability: (prob * 100).toFixed(1),
+                    roi: parseFloat(roi.toFixed(2)),
+                    daysLeft: diffDays.toFixed(1),
+                    volume: volume,
+                    slug: m.slug,
+                    outcomeIdx: idx,
+                    expiryDate: m.endDate
+                });
+            }
+        });
+    });
+
+    return { deals };
+}
+
+function triggerAlphaAlert(deal) {
+    chrome.notifications.create(NOTIF_PREFIX + deal.slug, {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "🔥 Alpha Opportunity Found",
+        message: `${deal.roi}% Yield found on: ${deal.title}\nOutcome: ${deal.outcome} (${deal.probability}%)`,
+        priority: 2
+    });
+}
+
+// Open Dashboard when notification is clicked
+chrome.notifications.onClicked.addListener((id) => {
+    if (id.startsWith(NOTIF_PREFIX)) {
+        chrome.tabs.create({ url: 'deals.html' });
+    }
+});
+
+// Listener for manual sync requests from UI
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === "manualSync") {
+        performBackgroundScan().then(() => sendResponse({ ok: true }));
+        return true;
+    }
+});

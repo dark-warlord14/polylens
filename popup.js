@@ -1,6 +1,5 @@
 // popup.js
 // Simplifies communication with the content script.
-// Logic moved to content.js for better persistence and reliability.
 
 document.addEventListener("DOMContentLoaded", function () {
     restoreState();
@@ -8,6 +7,9 @@ document.addEventListener("DOMContentLoaded", function () {
     setupTabs();
     document.getElementById("btn-apply").addEventListener("click", applyFilter);
     document.getElementById("btn-clear").addEventListener("click", clearFilter);
+    document.getElementById("btn-open-dashboard").addEventListener("click", function () {
+        chrome.tabs.create({ url: 'deals.html' });
+    });
     setupQuickFilters();
     prefillDates();
 });
@@ -83,13 +85,11 @@ function applyFilter() {
     var filters = buildFilters();
     if (!filters) return;
 
-    // Save to sync storage for persistence across reloads
     var payload = { mode: currentMode, filters: filters };
     chrome.storage.sync.set({ polyFilters: payload }, function () {
         console.log("Filters saved to storage.");
     });
 
-    // Message content script to apply
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
         if (!tabs[0]) return;
         chrome.tabs.sendMessage(tabs[0].id, {
@@ -113,7 +113,6 @@ function clearFilter() {
         var el = document.getElementById(id);
         if (el) el.value = "";
     });
-    // Removing from storage will trigger the listener in ALL tabs
     chrome.storage.sync.remove("polyFilters");
     hideStatus();
 }
@@ -179,3 +178,5 @@ function restoreState() {
         }
     });
 }
+
+
