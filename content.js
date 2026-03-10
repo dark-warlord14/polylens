@@ -1,6 +1,20 @@
-// content.js
-// Production-grade content script for PolyLens.
-// Optimized for performance with a MutationObserver that only processes NEW elements.
+/**
+ * content.js — PolyLens Elite In-Page Filter
+ *
+ * Runs on all polymarket.com pages (except /portfolio).
+ *
+ * Responsibilities:
+ *   - Receive filter settings (mode: days | date | range) from the popup via messages
+ *   - Dim market cards that don't match the active filter (adds .pm-dim class)
+ *   - Use MutationObserver to react to React/Next.js DOM updates dynamically
+ *   - Scan __NEXT_DATA__ JSON for market expiry dates (handles snake_case end_date)
+ *   - Receive market map updates from background via syncComplete message
+ *   - Run a 3-second safety pulse to catch any missed DOM mutations
+ *
+ * Note: Does NOT run on /portfolio to avoid interfering with portfolio UI.
+ * Note: __NEXT_DATA__ may use snake_case (end_date) or camelCase (endDate) — both handled.
+ */
+
 
 (function () {
     if (window.__polyLensActive) return;
@@ -10,10 +24,6 @@
     var marketData = {};
     var activeFilters = null;
     var debounceTimer;
-
-    // Use a WeakMap to track which roots we have already processed/bound
-    // This prevents re-processing the same elements during mutations.
-    var processedRoots = new WeakSet();
 
     function init() {
         injectStyles();
@@ -38,7 +48,6 @@
                     break;
                 }
                 if (m.type === "attributes" && m.attributeName === "class") {
-                    // Trigger if a class changed on an element (React might have stripped pm-dim)
                     var targetClass = (m.target && m.target.className) ? m.target.className : "";
                     if (typeof targetClass === "string" && !targetClass.includes("pm-dim")) {
                         needsUpdate = true;
@@ -55,14 +64,14 @@
 
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
 
-        // 3. Periodic safety pulse to catch any missed React state rewrites
+        // 3. Periodic safety pulse
         setInterval(function () {
             if (activeFilters) {
                 applyFilterLogic();
             }
         }, 3000);
 
-        // 4. Storage Listener: Sync changes across ALL tabs simultaneously
+        // 4. Storage Listener: Sync changes across tabs
         chrome.storage.onChanged.addListener(function (changes, area) {
             if (area === "sync" && changes.polyFilters) {
                 var s = changes.polyFilters.newValue;
@@ -94,10 +103,15 @@
             var d = JSON.parse(el.textContent);
             var scan = function (o) {
                 if (!o || typeof o !== "object") return;
-                if (o.slug && (o.endDate || o.resolutionDate)) {
+
+                // Polymarket __NEXT_DATA__ often uses snake_case end_date/resolution_date
+                var endDate = o.end_date || o.resolution_date || o.endDate || o.resolutionDate;
+                var isClosed = !!(o.closed || o.resolved);
+
+                if (o.slug && endDate) {
                     local[o.slug] = {
-                        endDate: o.endDate || o.resolutionDate,
-                        closed: !!(o.closed || o.resolved)
+                        endDate: endDate,
+                        closed: isClosed
                     };
                 }
                 Object.values(o).forEach(scan);
@@ -108,7 +122,10 @@
     }
 
     function applyFilterLogic() {
-        if (!activeFilters || !activeFilters.filters) return;
+        if (!activeFilters || !activeFilters.filters) {
+            document.querySelectorAll(".pm-dim").forEach(function (el) { el.classList.remove("pm-dim"); });
+            return;
+        }
 
         var mode = activeFilters.mode;
         var f = activeFilters.filters;
@@ -128,21 +145,26 @@
             var aGroup = l.closest('a.group.cursor-pointer') || l.closest('a.w-full');
             if (aGroup) return aGroup;
             var el = l;
-            for (var i = 0; i < 8; i++) { // Walk up 8 levels safely
+            for (var i = 0; i < 8; i++) {
                 var p = el.parentElement;
                 if (!p || p === document.body) break;
-                if (p.className && typeof p.className === "string" && p.className.includes("rounded") && p.className.includes("flex-col")) return p;
+                var className = (p.className && typeof p.className === "string") ? p.className : "";
+                if (className.includes("rounded") && className.includes("flex-col")) return p;
                 el = p;
             }
-            // Fallback: If we can't find a proper card container, applying dim to the tag directly is better than nothing, but we prefer 2 levels up.
             return l.parentElement && l.parentElement.parentElement ? l.parentElement.parentElement : l;
         }
 
         var links = document.querySelectorAll('a[href^="/event/"], a[href^="/market/"]');
+        var processedRoots = new Set();
+        var visibleCount = 0;
+        var totalCount = 0;
 
         links.forEach(function (link) {
             var card = findCardRoot(link);
-            if (!card) return;
+            if (!card || processedRoots.has(card)) return;
+            processedRoots.add(card);
+            totalCount++;
 
             var fullSlug = getFullSlug(link.getAttribute("href"));
             var baseSlug = fullSlug ? fullSlug.split('/')[0] : null;
@@ -174,15 +196,22 @@
                     show = (expiry >= start && expiry <= end);
                 }
             } else {
-                show = false;
+                // If we don't have data, we might want to hide it to be safe or show it.
+                // Polymarket sometimes has complex nested slugs.
+                // For now, let's keep it visible if we don't know better, 
+                // but if filters are active, maybe we should be stricter.
+                show = !activeFilters;
             }
 
-            if (show) card.classList.remove("pm-dim");
-            else card.classList.add("pm-dim");
-
-            // Note: We don't skip processing entirely because a filter change 
-            // might happen, but the DOM scan itself is faster now.
+            if (show) {
+                card.classList.remove("pm-dim");
+                visibleCount++;
+            } else {
+                card.classList.add("pm-dim");
+            }
         });
+
+        return { visible: visibleCount, total: totalCount };
     }
 
     function injectStyles() {
@@ -196,18 +225,14 @@
     chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
         if (msg.action === "syncComplete") {
             if (msg.data) {
-                // Background sync finished, merge new data and re-apply
                 marketData = Object.assign({}, marketData, msg.data, scanNextData());
                 applyFilterLogic();
             }
         } else if (msg.action === "applyFilters") {
             activeFilters = { mode: msg.mode, filters: msg.filters };
-            // Force a re-scan of page data and apply
             marketData = Object.assign({}, marketData, scanNextData());
-            applyFilterLogic();
-            var vis = document.querySelectorAll('a[href^="/event/"]:not(.pm-dim), a[href^="/market/"]:not(.pm-dim)').length;
-            var tot = document.querySelectorAll('a[href^="/event/"], a[href^="/market/"]').length;
-            sendResponse({ visible: Math.ceil(vis / 2), total: Math.ceil(tot / 2) });
+            var counts = applyFilterLogic();
+            sendResponse(counts);
         } else if (msg.action === "clearFilters") {
             activeFilters = null;
             document.querySelectorAll(".pm-dim").forEach(function (el) { el.classList.remove("pm-dim"); });

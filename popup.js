@@ -1,13 +1,24 @@
 // popup.js
 // Simplifies communication with the content script.
-// Logic moved to content.js for better persistence and reliability.
 
 document.addEventListener("DOMContentLoaded", function () {
     restoreState();
     refreshBadge();
     setupTabs();
-    document.getElementById("btn-apply").addEventListener("click", applyFilter);
-    document.getElementById("btn-clear").addEventListener("click", clearFilter);
+    
+    const applyBtn = document.getElementById("btn-apply");
+    if (applyBtn) applyBtn.addEventListener("click", applyFilter);
+    
+    const clearBtn = document.getElementById("btn-clear");
+    if (clearBtn) clearBtn.addEventListener("click", clearFilter);
+    
+    const dashboardBtn = document.getElementById("btn-open-dashboard");
+    if (dashboardBtn) {
+        dashboardBtn.addEventListener("click", function () {
+            chrome.tabs.create({ url: 'deals.html' });
+        });
+    }
+    
     setupQuickFilters();
     prefillDates();
 });
@@ -20,6 +31,7 @@ function setupTabs() {
             document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("active"); });
             tab.classList.add("active");
             currentMode = tab.getAttribute("data-mode");
+            
             document.querySelectorAll(".filter-section").forEach(function (s) { s.classList.remove("visible"); });
             var section = document.getElementById("section-" + currentMode);
             if (section) section.classList.add("visible");
@@ -31,74 +43,109 @@ function setupQuickFilters() {
     // Days chips
     document.querySelectorAll(".chip[data-val]").forEach(function (chip) {
         chip.addEventListener("click", function () {
-            document.getElementById("input-days").value = chip.getAttribute("data-val");
-            updateChips("days", chip);
-            applyFilter();
+            const input = document.getElementById("input-days");
+            if (input) {
+                input.value = chip.getAttribute("data-val");
+                updateChips("days", chip);
+                applyFilter();
+            }
         });
     });
 
     // Date chips
-    document.getElementById("chip-today").addEventListener("click", function () {
-        document.getElementById("input-date").value = new Date().toISOString().split("T")[0];
-        updateChips("date", this);
-        applyFilter();
-    });
+    const todayChip = document.getElementById("chip-today");
+    if (todayChip) {
+        todayChip.addEventListener("click", function () {
+            const input = document.getElementById("input-date");
+            if (input) {
+                input.value = new Date().toISOString().split("T")[0];
+                updateChips("date", this);
+                applyFilter();
+            }
+        });
+    }
 
-    document.getElementById("chip-end-month").addEventListener("click", function () {
-        var now = new Date();
-        var lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        document.getElementById("input-date").value = lastDay.toISOString().split("T")[0];
-        updateChips("date", this);
-        applyFilter();
-    });
+    const endMonthChip = document.getElementById("chip-end-month");
+    if (endMonthChip) {
+        endMonthChip.addEventListener("click", function () {
+            const input = document.getElementById("input-date");
+            if (input) {
+                var now = new Date();
+                var lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                input.value = lastDay.toISOString().split("T")[0];
+                updateChips("date", this);
+                applyFilter();
+            }
+        });
+    }
 }
 
 function updateChips(context, activeChip) {
     var parent = activeChip.parentElement;
-    parent.querySelectorAll(".chip").forEach(function (c) { c.classList.remove("active"); });
-    activeChip.classList.add("active");
+    if (parent) {
+        parent.querySelectorAll(".chip").forEach(function (c) { c.classList.remove("active"); });
+        activeChip.classList.add("active");
+    }
 }
 
 function prefillDates() {
     var today = new Date().toISOString().split("T")[0];
     var startInput = document.getElementById("input-start");
-    if (!startInput.value) {
+    if (startInput && !startInput.value) {
         startInput.value = today;
     }
 }
 
 function refreshBadge() {
     chrome.runtime.sendMessage({ action: "getCount" }, function (res) {
-        if (chrome.runtime.lastError || !res) return;
-        var b = document.getElementById("api-badge");
-        var t = document.getElementById("api-badge-text");
-        if (res.count > 0) {
-            b.className = "badge badge-ok";
-            t.textContent = res.count + " markets synced";
+        if (chrome.runtime.lastError || !res) {
+            updateBadgeUI(0, "error");
+            return;
         }
+        updateBadgeUI(res.count, res.count > 0 ? "ok" : "loading");
     });
+}
+
+function updateBadgeUI(count, state) {
+    var b = document.getElementById("api-badge");
+    var t = document.getElementById("api-badge-text");
+    if (!b || !t) return;
+
+    if (state === "error") {
+        b.className = "badge badge-error";
+        t.textContent = "Sync required";
+    } else if (state === "ok") {
+        b.className = "badge badge-ok";
+        t.textContent = count.toLocaleString() + " markets synced";
+    } else {
+        b.className = "badge badge-loading";
+        t.textContent = "Scanning markets...";
+    }
 }
 
 function applyFilter() {
     var filters = buildFilters();
-    if (!filters) return;
+    if (!filters && currentMode !== "deals") return;
 
-    // Save to sync storage for persistence across reloads
     var payload = { mode: currentMode, filters: filters };
     chrome.storage.sync.set({ polyFilters: payload }, function () {
         console.log("Filters saved to storage.");
     });
 
-    // Message content script to apply
+    if (currentMode === "deals") return;
+
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        if (!tabs[0]) return;
+        if (!tabs[0] || !tabs[0].url || !tabs[0].url.includes("polymarket.com")) {
+            showStatus("Open Polymarket to apply filters", "error");
+            return;
+        }
         chrome.tabs.sendMessage(tabs[0].id, {
             action: "applyFilters",
             mode: currentMode,
             filters: filters
         }, function (response) {
             if (chrome.runtime.lastError) {
-                showStatus("Refresh page to activate filter", "error");
+                showStatus("Refresh Polymarket to activate", "error");
                 return;
             }
             if (response) {
@@ -113,25 +160,34 @@ function clearFilter() {
         var el = document.getElementById(id);
         if (el) el.value = "";
     });
-    // Removing from storage will trigger the listener in ALL tabs
     chrome.storage.sync.remove("polyFilters");
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        if (tabs[0]) {
+            chrome.tabs.sendMessage(tabs[0].id, { action: "clearFilters" }).catch(() => {});
+        }
+    });
     hideStatus();
 }
 
 function buildFilters() {
     if (currentMode === "days") {
-        var d = document.getElementById("input-days").value;
+        var el = document.getElementById("input-days");
+        var d = el ? el.value : "";
         if (d === "") return null;
         return { daysToExpiry: parseInt(d, 10) };
     }
     if (currentMode === "date") {
-        var dt = document.getElementById("input-date").value;
+        var el = document.getElementById("input-date");
+        var dt = el ? el.value : "";
         if (!dt) return null;
         return { exactDate: dt };
     }
     if (currentMode === "range") {
-        var s = document.getElementById("input-start").value;
-        var e = document.getElementById("input-end").value;
+        var sEl = document.getElementById("input-start");
+        var eEl = document.getElementById("input-end");
+        var s = sEl ? sEl.value : "";
+        var e = eEl ? eEl.value : "";
         if (!s || !e) return null;
         return { rangeStart: s, rangeEnd: e };
     }
@@ -142,6 +198,8 @@ function showStatus(text, type) {
     var b = document.getElementById("status-bar");
     var labels = document.getElementById("status-text");
     var c = document.getElementById("status-counts");
+    if (!b || !labels || !c) return;
+
     b.classList.remove("hidden");
     if (type === "error") {
         b.style.background = "#fff1f2";
@@ -157,7 +215,8 @@ function showStatus(text, type) {
 }
 
 function hideStatus() {
-    document.getElementById("status-bar").classList.add("hidden");
+    var b = document.getElementById("status-bar");
+    if (b) b.classList.add("hidden");
 }
 
 function restoreState() {
@@ -165,17 +224,26 @@ function restoreState() {
         if (!res.polyFilters) return;
         var s = res.polyFilters;
         currentMode = s.mode || "days";
+        
         document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("active"); });
         var t = document.querySelector('.tab[data-mode="' + currentMode + '"]');
         if (t) t.classList.add("active");
+        
         document.querySelectorAll(".filter-section").forEach(function (sec) { sec.classList.remove("visible"); });
         var sec = document.getElementById("section-" + currentMode);
         if (sec) sec.classList.add("visible");
+        
         if (s.filters) {
-            if (s.filters.daysToExpiry !== undefined) document.getElementById("input-days").value = s.filters.daysToExpiry;
-            if (s.filters.exactDate) document.getElementById("input-date").value = s.filters.exactDate;
-            if (s.filters.rangeStart) document.getElementById("input-start").value = s.filters.rangeStart;
-            if (s.filters.rangeEnd) document.getElementById("input-end").value = s.filters.rangeEnd;
+            var f = s.filters;
+            var iDays = document.getElementById("input-days");
+            var iDate = document.getElementById("input-date");
+            var iStart = document.getElementById("input-start");
+            var iEnd = document.getElementById("input-end");
+
+            if (iDays && f.daysToExpiry !== undefined) iDays.value = f.daysToExpiry;
+            if (iDate && f.exactDate) iDate.value = f.exactDate;
+            if (iStart && f.rangeStart) iStart.value = f.rangeStart;
+            if (iEnd && f.rangeEnd) iEnd.value = f.rangeEnd;
         }
     });
 }

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "PolyLens",
-  "version": "2.0.0",
-  "description": "Filter Polymarket markets by expiry date, days to expiry, or date range.",
+  "name": "PolyLens Elite",
+  "version": "2.1.0",
+  "description": "Professional toolkit for Polymarket: Expiry filtering and real-time market discovery dashboard.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -34,8 +34,11 @@
   ],
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "https://polymarket.com/*",
