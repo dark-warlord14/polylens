@@ -402,6 +402,43 @@ body {
     color: var(--accent);
 }
 
+/* Separator in top nav */
+.nav-sep {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 12px;
+}
+
+/* Mini Outcome Chips (integrated in main nav) */
+.outcome-chip-mini {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-3);
+    font-weight: 500;
+}
+
+.outcome-chip-mini span {
+    opacity: 0.5;
+    margin-left: 4px;
+}
+
+.outcome-chip-mini:hover {
+    border-color: var(--border-hover);
+    color: var(--text-2);
+}
+
+.outcome-chip-mini.active {
+    background: var(--accent-trans);
+    color: var(--accent);
+    border-color: var(--accent);
+    border-style: solid;
+}
+
+.outcome-chip-mini.active span {
+    opacity: 1;
+}
+
 /* ─── Market Grid ─────────────────────────────────────── */
 .deals-grid {
     flex: 1;

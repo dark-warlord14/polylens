@@ -24,6 +24,7 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes — matches background alarm
 
 let allOpportunities = [];
 let currentCategory = "all";
+let activeOutcome = null; // Outcome filter state ("Yes" | "No" | null)
 const CORE_CATEGORIES = ["Politics", "Elections", "Sports", "Crypto", "Finance", "Economy", "Geopolitics", "Tech", "Culture", "Climate & Science"];
 
 // ─── Init ──────────────────────────────────────────────────────────
@@ -249,10 +250,16 @@ function applyFilters() {
 
     updateCategoryChips(sidebarFiltered);
 
-    const finalFiltered = sidebarFiltered.filter(d => {
+    const categoryFiltered = sidebarFiltered.filter(d => {
         if (currentCategory === "all") return true;
         if (currentCategory === "Other") return !CORE_CATEGORIES.includes(d.category);
         return d.category === currentCategory;
+    });
+
+    const finalFiltered = categoryFiltered.filter(d => {
+        if (!activeOutcome) return true;
+        // Case-insensitive match for robustness
+        return d.outcome.toLowerCase() === activeOutcome.toLowerCase();
     });
 
     if (sortBy === "roi") finalFiltered.sort((a, b) => b.roi - a.roi);
@@ -296,7 +303,31 @@ function updateCategoryChips(filtered) {
             applyFilters();
         });
     });
+
+    // Add separator & Yes/No chips
+    const sep = document.createElement("div");
+    sep.className = "nav-sep";
+    container.appendChild(sep);
+
+    // Count Yes/No in the CURRENT category filtered set for better UX
+    const yesCount = filtered.filter(d => d.outcome.toLowerCase() === "yes").length;
+    const noCount = filtered.filter(d => d.outcome.toLowerCase() === "no").length;
+
+    const makeOutcomeChip = (label, value, count, isActive) => {
+        const btn = document.createElement("button");
+        btn.className = `cat-chip outcome-chip-mini${isActive ? " active" : ""}`;
+        btn.innerHTML = `${label} <span>${count}</span>`;
+        btn.onclick = () => {
+            activeOutcome = isActive ? null : value;
+            applyFilters();
+        };
+        container.appendChild(btn);
+    };
+
+    makeOutcomeChip("Yes", "Yes", yesCount, activeOutcome === "Yes");
+    makeOutcomeChip("No", "No", noCount, activeOutcome === "No");
 }
+
 
 // ─── Render ────────────────────────────────────────────────────────
 
