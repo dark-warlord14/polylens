@@ -1,6 +1,20 @@
-// content.js
-// Production-grade content script for PolyLens.
-// Optimized for performance with a MutationObserver that only processes NEW elements.
+/**
+ * content.js — PolyLens Elite In-Page Filter
+ *
+ * Runs on all polymarket.com pages (except /portfolio).
+ *
+ * Responsibilities:
+ *   - Receive filter settings (mode: days | date | range) from the popup via messages
+ *   - Dim market cards that don't match the active filter (adds .pm-dim class)
+ *   - Use MutationObserver to react to React/Next.js DOM updates dynamically
+ *   - Scan __NEXT_DATA__ JSON for market expiry dates (handles snake_case end_date)
+ *   - Receive market map updates from background via syncComplete message
+ *   - Run a 3-second safety pulse to catch any missed DOM mutations
+ *
+ * Note: Does NOT run on /portfolio to avoid interfering with portfolio UI.
+ * Note: __NEXT_DATA__ may use snake_case (end_date) or camelCase (endDate) — both handled.
+ */
+
 
 (function () {
     if (window.__polyLensActive) return;
@@ -89,10 +103,15 @@
             var d = JSON.parse(el.textContent);
             var scan = function (o) {
                 if (!o || typeof o !== "object") return;
-                if (o.slug && (o.endDate || o.resolutionDate)) {
+
+                // Polymarket __NEXT_DATA__ often uses snake_case end_date/resolution_date
+                var endDate = o.end_date || o.resolution_date || o.endDate || o.resolutionDate;
+                var isClosed = !!(o.closed || o.resolved);
+
+                if (o.slug && endDate) {
                     local[o.slug] = {
-                        endDate: o.endDate || o.resolutionDate,
-                        closed: !!(o.closed || o.resolved)
+                        endDate: endDate,
+                        closed: isClosed
                     };
                 }
                 Object.values(o).forEach(scan);
@@ -181,7 +200,7 @@
                 // Polymarket sometimes has complex nested slugs.
                 // For now, let's keep it visible if we don't know better, 
                 // but if filters are active, maybe we should be stricter.
-                show = !activeFilters; 
+                show = !activeFilters;
             }
 
             if (show) {

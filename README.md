@@ -1,45 +1,115 @@
 # PolyLens Elite
 
-**PolyLens Elite** is a professional-grade Chrome extension for Polymarket power users. It provides advanced expiry filtering directly on the Polymarket UI and a dedicated "Alpha Discovery" dashboard for institutional-grade arbitrage and yield hunting.
+**PolyLens Elite** is a professional Chrome extension for Polymarket power users. It combines an in-page expiry filter with a full-spectrum **Market Discovery Dashboard** — scanning 30,000+ active markets and surfacing high-confidence opportunities in real time.
 
-## 🚀 Key Features
+---
 
-### 1. In-Page Expiry Filtering
-- **Dynamic Content Injection**: Automatically dims markets on Polymarket.com that don't match your criteria.
-- **Three Filtering Modes**:
-    - **Days Left**: Show markets expiring within X days.
-    - **Exact Date**: Target specific resolution dates (e.g., today, end of month).
-    - **Date Range**: Filter for custom windows (e.g., Q4 2024).
-- **Intelligent Detection**: Works across all Polymarket layouts (Grid, List, and Event pages).
-- **Auto-Sync**: Automatically keeps market data fresh via background synchronization.
+## Features
 
-### 2. Alpha Discovery Dashboard (Elite Mode)
-- **Deep Market Scan**: Background engine crawls up to 50,000+ active markets across the entire Polymarket ecosystem.
-- **Institutional ROI Filters**: Find high-probability deals (70%+) with professional liquidity floors.
-- **Order Book Depth Analysis**: Real-time integration with the Polymarket CLOB to calculate:
-    - **Effective ROI**: Adjusted for slippage on a standard $1,000 trade.
-    - **Liquidity Depth**: Instant verification of sell-side depth before you click.
-- **Categorization**: Automated tagging for Politics, Crypto, Sports, and more.
+### Market Discovery Dashboard (`deals.html`)
 
-### 3. Alpha Alerts
-- **Background Scanning**: Periodic market analysis every 15 minutes.
-- **Push Notifications**: Get notified instantly when a "Truly New" institutional-grade opportunity (3%+ ROI, 85%+ Probability, $25k+ Volume) is detected.
+A dedicated full-screen dashboard that scans the entire Polymarket ecosystem and filters opportunities to your spec.
 
-## 🛠️ Installation
+- **Full Spectrum Scan** — fetches all active markets via the Gamma API with paginated requests (up to 30k+ markets per sync)
+- **Smart Cache** — loads from `chrome.storage.local` on open (no API call). Background alarm re-syncs every 30 minutes automatically
+- **Precise Expiry Countdowns** — shows `6h 14m left`, `1d 3h left`, not vague labels
+- **Polymarket-matched Categories** — Politics, Elections, Sports, Crypto, Finance, Economy, Geopolitics, Tech, Culture, Climate & Science
+- **Persistent Filters** — Volume floor, expiry window, probability floor, and sort order save to `chrome.storage.sync` via the **Save Config** button
+- **Live Stats** — markets scanned, filtered count, last synced timestamp
 
-1.  Download or clone this repository.
-2.  Open Chrome and navigate to `chrome://extensions/`.
-3.  Enable **Developer mode** in the top right corner.
-4.  Click **Load unpacked** and select the extension folder.
-5.  Pin the extension to your toolbar for easy access.
+### In-Page Expiry Filter (`content.js`)
 
-## ⚙️ Technical Architecture
+Overlays directly on `polymarket.com` to dim markets that don't match your criteria.
 
-- **Background Engine**: A robust service worker (`background.js`) handles pagination-aware API polling (100-market pages) and persistent storage in `chrome.storage.local`.
-- **Content Script**: Optimized `MutationObserver` (`content.js`) ensures zero performance lag while filtering thousands of DOM elements.
-- **CLOB Integration**: Direct WebSocket/REST communication with `clob.polymarket.com` for real-time order book snapshots.
-- **Privacy**: All calculations and filtering happen locally on your machine.
+- **Three Modes**: Days Left · Exact Date · Date Range
+- **Works everywhere**: Grid, List, Event pages, Search results
+- **Auto-updates** via `MutationObserver` and a 3-second safety pulse
+- **Market map** pushed from background on every sync for up-to-date expiry data
 
-## 📄 License
+### Smart Alerts
 
-MIT. Created for Polymarket power users.
+- **Background alarm** every 30 minutes keeps data fresh without battery drain
+- **Push notification** triggered when a new opportunity appears with ≥ 90% probability, ≥ 5% ROI, and ≥ $50K volume
+
+---
+
+## Installation
+
+1. Clone or download this repository
+2. Open Chrome → `chrome://extensions/`
+3. Enable **Developer Mode** (top right)
+4. Click **Load unpacked** → select the `polylens/` folder
+5. Pin the extension from the toolbar
+
+---
+
+## Usage
+
+### Dashboard
+- Click the extension icon → **Open Dashboard** (or navigate directly to `deals.html`)
+- On first launch, a market scan runs automatically
+- Subsequent opens load from cache instantly — use **Sync Markets** to force a fresh scan
+- Adjust filters in the sidebar, then click **Save Config** to persist them
+
+### In-Page Filter
+- Navigate to [polymarket.com](https://polymarket.com)
+- Open the extension popup and set your expiry filter
+- Markets outside your window are dimmed in real time
+
+---
+
+## Architecture
+
+| File | Role |
+|------|------|
+| `background.js` | Service worker — market fetching, processing, storage, alarms, notifications |
+| `deals.js` | Dashboard controller — cache-first init, filter pipeline, render, config persistence |
+| `deals.html` | Dashboard UI shell |
+| `deals.css` | Dashboard styles (Polymarket dark theme) |
+| `content.js` | In-page MutationObserver filter for polymarket.com |
+| `popup.js` | Extension popup — filter controls and page-filter triggers |
+| `manifest.json` | Extension config (MV3, unlimitedStorage) |
+
+### Storage Keys
+
+| Key | Store | Contents |
+|-----|-------|----------|
+| `polylens_elite_cache` | `local` | `{ timestamp, count, deals[] }` |
+| `polylens_market_map` | `local` | `{ [slug]: { endDate, closed } }` |
+| `polylens_filter_config` | `sync` | `{ minVolume, maxDays, minProb, sortBy }` |
+| `polyFilters` | `sync` | In-page expiry filter settings |
+
+### API
+
+All data sourced from the public **Polymarket Gamma API** — no authentication required, no user data sent.
+
+```
+GET https://gamma-api.polymarket.com/markets?limit=500&offset=N&active=true&closed=false
+```
+
+Notes:
+- Gamma API uses `snake_case` fields (`end_date`, `outcome_prices`) — the background engine handles both camelCase and snake_case for robustness
+- Rate limiting: 100ms delay between pages
+
+---
+
+## Default Filter Settings
+
+| Filter | Default | Description |
+|--------|---------|-------------|
+| Min Volume | $10,000 | Minimum USD traded on the market |
+| Max Days | 1 day | Markets expiring within N days |
+| Probability Floor | 80% | Minimum outcome probability |
+| Sort | Highest ROI | Order of displayed results |
+
+---
+
+## Privacy
+
+All processing is done locally on your machine. The extension only makes outbound requests to the public Polymarket Gamma API. No personal data is collected or stored remotely.
+
+---
+
+## License
+
+MIT — created for the Polymarket community.

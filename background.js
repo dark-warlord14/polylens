@@ -1,65 +1,72 @@
 /**
- * background.js - PolyLens Professional Background Engine
- * Handles persistent cache (chrome.storage.local), background scanning (alarms),
- * and Alpha Alerts (notifications).
+ * background.js — PolyLens Elite Service Worker
+ *
+ * Responsibilities:
+ *   - Fetch all active markets from Polymarket Gamma API (paginated, 500/page)
+ *   - Process raw markets into opportunity objects with category, ROI, probability
+ *   - Store results to chrome.storage.local (polylens_elite_cache + polylens_market_map)
+ *   - Broadcast syncComplete to dashboard (deals.html) and content scripts
+ *   - Run an auto-scan alarm every 30 minutes
+ *   - Fire push notifications for top-tier new opportunities
+ *
+ * API: https://gamma-api.polymarket.com/markets (public, no auth)
+ * Note: Gamma API returns snake_case fields (end_date, outcome_prices).
+ *       Code handles both snake_case and camelCase for robustness.
+ *
+ * Storage:
+ *   chrome.storage.local  →  polylens_elite_cache  (deals + count + timestamp)
+ *   chrome.storage.local  →  polylens_market_map   (slug → { endDate, closed })
  */
 
-const CACHE_KEY = "polylens_pro_cache";
+const CACHE_KEY = "polylens_elite_cache";
 const MARKET_MAP_KEY = "polylens_market_map";
 const SCAN_ALARM = "polylens_scan_alarm";
-const NOTIF_PREFIX = "polylens_deal_";
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 chrome.runtime.onInstalled.addListener(() => {
-    console.log("PolyLens Pro: Engine Initialized");
+    console.log("PolyLens Elite: Initialized.");
     setupAlarms();
     performBackgroundScan();
 });
 
-// Alarm Listener for Background Polling (with robust context handling)
 chrome.alarms.onAlarm.addListener((alarm) => {
-    try {
-        if (alarm.name === SCAN_ALARM) {
-            console.log("PolyLens Pro: Executing scheduled background scan...");
-            performBackgroundScan();
-        }
-    } catch (e) {
-        console.error("PolyLens Pro: Context error in background listener", e);
+    if (alarm.name === SCAN_ALARM) {
+        performBackgroundScan();
     }
 });
 
 function setupAlarms() {
-    // Schedule a scan every 15 minutes
-    chrome.alarms.create(SCAN_ALARM, { periodInMinutes: 15 });
+    chrome.alarms.create(SCAN_ALARM, { periodInMinutes: 30 });
 }
 
-/**
- * Performs a full spectrum scan of all available markets.
- * Syncs the results to storage.local for dashboard and content script use.
- */
+// ─── Core Scan ────────────────────────────────────────────────────
 let isScanning = false;
 
 async function performBackgroundScan() {
-    if (isScanning) return;
+    if (isScanning) {
+        console.warn("PolyLens Elite: Scan already active.");
+        return;
+    }
+    isScanning = true;
+    console.log("PolyLens Elite: Starting full-spectrum scan...");
 
     try {
-        isScanning = true;
         const markets = await fetchAllMarkets();
-        if (markets.length === 0) {
+        if (!markets || markets.length === 0) {
+            console.warn("PolyLens Elite: No markets returned from API.");
             isScanning = false;
             return;
         }
 
-        const now = Date.now();
-        
-        // 1. Process for Alpha Dashboard
-        const result = processMarketsIntoDeals(markets);
-        
-        // 2. Process for Content Script Filtering (Full Map)
+        const opportunities = processMarkets(markets);
+
+        // Build market map for content script (expiry + closed status)
         const marketMap = {};
         markets.forEach(m => {
             if (m.slug) {
+                // Gamma API uses snake_case; fall back to camelCase for safety
                 marketMap[m.slug] = {
-                    endDate: m.endDate || m.resolutionDate,
+                    endDate: m.end_date || m.endDate || m.resolution_date || m.resolutionDate,
                     closed: !!(m.closed || m.resolved)
                 };
             }
@@ -67,204 +74,210 @@ async function performBackgroundScan() {
 
         const existing = await chrome.storage.local.get([CACHE_KEY]);
         const oldDeals = existing[CACHE_KEY]?.deals || [];
-        const oldIds = new Set(oldDeals.map(d => d.slug + d.outcome));
+        const oldKeys = new Set(oldDeals.map(d => d.slug + "_" + d.outcome));
 
         await chrome.storage.local.set({
             [CACHE_KEY]: {
-                timestamp: now,
+                timestamp: Date.now(),
                 count: markets.length,
-                deals: result.deals
+                deals: opportunities
             },
             [MARKET_MAP_KEY]: marketMap
         });
 
-        console.log(`PolyLens Pro: Sync Complete. ${markets.length} markets mapped. ${result.deals.length} alpha deals.`);
+        console.log(`PolyLens Elite: Scan complete. ${markets.length} markets → ${opportunities.length} opportunities.`);
         isScanning = false;
 
-        // Notify content scripts that sync is complete
-        chrome.tabs.query({}, (tabs) => {
+        // Notify dashboard (deals.html)
+        chrome.runtime.sendMessage({
+            action: "syncComplete",
+            count: markets.length,
+            opportunities: opportunities.length
+        }).catch(() => { }); // Suppress "no listener" error if dashboard isn't open
+
+        // Notify Polymarket tabs (content script)
+        chrome.tabs.query({}, tabs => {
             tabs.forEach(tab => {
-                if (tab.url && (tab.url.includes("polymarket.com"))) {
-                    chrome.tabs.sendMessage(tab.id, { action: "syncComplete", data: marketMap }).catch(() => {});
+                if (tab.url && tab.url.includes("polymarket.com")) {
+                    chrome.tabs.sendMessage(tab.id, { action: "syncComplete", data: marketMap }).catch(() => { });
                 }
             });
         });
 
-        // Trigger notifications for TRULY new institutional grade deals
-        const newAlpha = result.deals.filter(d =>
-            !oldIds.has(d.slug + d.outcome) &&
-            d.roi >= 3 &&
-            d.probability >= 85 &&
-            d.volume >= 25000 
+        // Alert for top-tier new opportunities
+        const newAlpha = opportunities.filter(d =>
+            !oldKeys.has(d.slug + "_" + d.outcome) &&
+            d.roi >= 5 &&
+            d.probability >= 90 &&
+            d.volume >= 50000
         );
-
         if (newAlpha.length > 0) {
-            triggerAlphaAlert(newAlpha[0]);
+            triggerNotification(newAlpha[0]);
         }
 
     } catch (e) {
-        console.error("PolyLens Pro: Background Scan Failed", e);
+        console.error("PolyLens Elite: Scan error:", e);
         isScanning = false;
     }
 }
 
+// ─── Fetching ──────────────────────────────────────────────────────
 async function fetchAllMarkets() {
-    const pageSize = 100; // API often performs better with smaller pages
+    const pageSize = 500;
     let offset = 0;
     let all = [];
     let hasMore = true;
-    let consecutiveEmpty = 0;
-
-    console.log("PolyLens Pro: Starting Deep Market Scan...");
+    let consecutiveErrors = 0;
 
     while (hasMore) {
-        // We remove active=true and closed=false to see if it catches more, 
-        // but typically gamma-api /markets endpoint needs some filters or just works with offset.
-        // Let's try to be as broad as possible.
-        const url = `https://gamma-api.polymarket.com/markets?limit=${pageSize}&offset=${offset}&active=true`;
+        const url = `https://gamma-api.polymarket.com/markets?limit=${pageSize}&offset=${offset}&active=true&closed=false`;
         try {
             const res = await fetch(url);
-            if (!res.ok) {
-                console.error(`PolyLens Pro: API Error ${res.status} at offset ${offset}`);
-                break;
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
 
             if (data && Array.isArray(data) && data.length > 0) {
                 all = all.concat(data);
                 offset += data.length;
-                consecutiveEmpty = 0;
-                
-                if (offset % 1000 === 0) {
-                    console.log(`PolyLens Pro: Scanned ${offset} markets...`);
-                }
-
-                // If we got less than we asked for, we might be at the end
-                if (data.length < pageSize) {
-                    hasMore = false;
-                }
+                consecutiveErrors = 0;
+                chrome.runtime.sendMessage({ action: "syncProgress", count: all.length }).catch(() => { });
+                if (data.length < pageSize) hasMore = false;
             } else {
-                // Sometimes APIs have gaps or temporary empty returns
-                consecutiveEmpty++;
-                if (consecutiveEmpty > 2) {
-                    hasMore = false;
-                } else {
-                    offset += pageSize; // Try skipping a page
-                }
+                hasMore = false;
             }
         } catch (e) {
-            console.error("PolyLens Pro: Fetch Error", e);
-            hasMore = false;
+            consecutiveErrors++;
+            console.warn(`PolyLens Elite: Fetch error at offset ${offset}:`, e.message);
+            if (consecutiveErrors > 2) hasMore = false;
+            else offset += pageSize;
         }
-        
-        // Adaptive delay to avoid rate limiting
-        await new Promise(r => setTimeout(r, 50));
-
-        // Safety break for extreme cases
-        if (offset > 50000) {
-            console.warn("PolyLens Pro: Safety limit reached (50k markets). Stopping scan.");
-            break;
-        }
+        await new Promise(r => setTimeout(r, 100));
     }
 
-    console.log(`PolyLens Pro: Deep Scan Complete. Total: ${all.length} markets.`);
-    return all;
+    // Deduplicate
+    const seen = new Set();
+    return all.filter(m => {
+        const id = m.id || m.slug;
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+    });
 }
 
-function processMarketsIntoDeals(markets) {
-    const deals = [];
+// ─── Processing ────────────────────────────────────────────────────
+function processMarkets(markets) {
+    const opportunities = [];
     const now = new Date();
 
     markets.forEach(m => {
-        if (!m.endDate || !m.outcomePrices || !m.outcomes) return;
+        // Gamma API sends snake_case; fall back to camelCase for robustness
+        const endDate = m.end_date || m.endDate || m.resolution_date || m.resolutionDate;
+        const rawPrices = m.outcome_prices || m.outcomePrices;
+        const rawOutcomes = m.outcomes;
+
+        if (!endDate || !rawPrices || !rawOutcomes) return;
 
         const volume = parseFloat(m.volume || 0);
-        const expiry = new Date(m.endDate);
+        const expiry = new Date(endDate);
         const diffDays = (expiry - now) / (1000 * 60 * 60 * 24);
-
         if (diffDays <= 0) return;
 
-        let prices = m.outcomePrices;
-        let outcomes = m.outcomes;
-        if (typeof prices === "string") { try { prices = JSON.parse(prices); } catch (e) { return; } }
-        if (typeof outcomes === "string") { try { outcomes = JSON.parse(outcomes); } catch (e) { return; } }
+        let prices = rawPrices;
+        let outcomes = rawOutcomes;
+        try {
+            if (typeof prices === "string") prices = JSON.parse(prices);
+            if (typeof outcomes === "string") outcomes = JSON.parse(outcomes);
+        } catch (e) { return; }
 
         if (!Array.isArray(prices) || !Array.isArray(outcomes)) return;
 
-        let rawCat = "General";
-        const title = m.question.toLowerCase();
+        // Category mapping — mirrors Polymarket's official navigation categories:
+        // Politics · Elections · Sports · Crypto · Finance · Economy · Geopolitics · Tech · Culture · Climate & Science
+        const apiCat = (m.category || "").toLowerCase();
+        const titleLower = (m.question || m.description || "").toLowerCase();
+        let category = "Other";
 
-        if (m.category && m.category.length > 0) {
-            rawCat = m.category.split(',')[0];
-        } else if (title.includes("election") || title.includes("biden") || title.includes("trump") || title.includes("politics")) {
-            rawCat = "Politics";
-        } else if (title.includes("bitcoin") || title.includes("eth") || title.includes("crypto") || title.includes("solana")) {
-            rawCat = "Crypto";
-        } else if (title.includes("nfl") || title.includes("nba") || title.includes("mlb") || title.includes("sports")) {
-            rawCat = "Sports";
-        } else if (m.groupItemTitle) {
-            rawCat = m.groupItemTitle;
+        if (apiCat.includes("election") || titleLower.includes("election") || titleLower.includes("vote") || titleLower.includes("ballot") || titleLower.includes("midterm")) {
+            category = "Elections";
+        } else if (apiCat.includes("politic") || titleLower.includes("president") || titleLower.includes("congress") || titleLower.includes("senate") || titleLower.includes("white house") || titleLower.includes("trump") || titleLower.includes("biden") || titleLower.includes("democrat") || titleLower.includes("republican")) {
+            category = "Politics";
+        } else if (apiCat.includes("geopolit") || titleLower.includes("iran") || titleLower.includes("russia") || titleLower.includes("ukraine") || titleLower.includes("china") || titleLower.includes("nato") || titleLower.includes("war") || titleLower.includes("military") || titleLower.includes("sanctions") || titleLower.includes("ceasefire") || titleLower.includes("nuclear")) {
+            category = "Geopolitics";
+        } else if (apiCat.includes("crypto") || titleLower.includes("bitcoin") || titleLower.includes("ethereum") || titleLower.includes(" btc") || titleLower.includes(" eth ") || titleLower.includes("solana") || titleLower.includes("defi") || titleLower.includes("nft") || titleLower.includes("altcoin") || titleLower.includes("crypto")) {
+            category = "Crypto";
+        } else if (apiCat.includes("finance") || titleLower.includes("s&p") || titleLower.includes("nasdaq") || titleLower.includes("stock") || titleLower.includes("fed ") || titleLower.includes("federal reserve") || titleLower.includes("interest rate") || titleLower.includes("crude oil") || titleLower.includes("oil price") || titleLower.includes("cpi") || titleLower.includes("inflation") || titleLower.includes("tariff") || titleLower.includes("trade war") || titleLower.includes("ipo")) {
+            category = "Finance";
+        } else if (apiCat.includes("economy") || titleLower.includes("gdp") || titleLower.includes("recession") || titleLower.includes("unemployment") || titleLower.includes("jobs report") || titleLower.includes("economic")) {
+            category = "Economy";
+        } else if (apiCat.includes("tech") || titleLower.includes("chatgpt") || titleLower.includes("openai") || titleLower.includes("artificial intelligence") || titleLower.includes("llm") || titleLower.includes("apple") || titleLower.includes("google") || titleLower.includes("microsoft") || titleLower.includes("meta ") || titleLower.includes("tesla") || titleLower.includes("elon") || titleLower.includes("spacex")) {
+            category = "Tech";
+        } else if (apiCat.includes("sport") || titleLower.includes(" nba ") || titleLower.includes(" nfl ") || titleLower.includes(" mlb ") || titleLower.includes("fifa") || titleLower.includes(" epl ") || titleLower.includes("premier league") || titleLower.includes("champion") || titleLower.includes("super bowl") || titleLower.includes("world cup") || titleLower.includes(" vs ") || titleLower.includes("basketball") || titleLower.includes("football") || titleLower.includes("soccer")) {
+            category = "Sports";
+        } else if (apiCat.includes("climate") || apiCat.includes("science") || titleLower.includes("climate") || titleLower.includes("nasa") || titleLower.includes("space") || titleLower.includes("weather") || titleLower.includes("earthquake") || titleLower.includes("hurricane")) {
+            category = "Climate & Science";
+        } else if (apiCat.includes("culture") || apiCat.includes("entertainment") || apiCat.includes("pop") || titleLower.includes("oscar") || titleLower.includes("grammy") || titleLower.includes("emmy") || titleLower.includes("eurovision") || titleLower.includes("movie") || titleLower.includes("album") || titleLower.includes("award")) {
+            category = "Culture";
+        } else if (m.category) {
+            const first = m.category.split(",")[0].trim();
+            if (first.length > 2 && !/^[0-9↑↓.%+\-]+$/.test(first)) {
+                category = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+            }
         }
 
-        const cleanCat = rawCat.charAt(0).toUpperCase() + rawCat.slice(1).toLowerCase().trim();
+        const marketTitle = m.question || m.description || m.groupItemTitle || "Untitled Market";
 
         prices.forEach((p, idx) => {
             const prob = parseFloat(p);
-            if (!isNaN(prob) && prob >= 0.70 && prob < 0.999) {
-                const roi = ((1 - prob) / prob) * 100;
-                deals.push({
-                    title: m.question,
-                    outcome: outcomes[idx],
+            if (!isNaN(prob) && prob >= 0.01 && prob <= 0.99) {
+                opportunities.push({
+                    title: marketTitle,
+                    outcome: outcomes[idx] || "Yes",
                     probability: parseFloat((prob * 100).toFixed(1)),
-                    roi: parseFloat(roi.toFixed(2)),
-                    daysLeft: parseFloat(diffDays.toFixed(1)),
+                    roi: parseFloat((((1 - prob) / prob) * 100).toFixed(2)),
+                    daysLeft: parseFloat(Math.max(0, diffDays).toFixed(1)),
                     volume: volume,
-                    category: cleanCat,
+                    category: category,
                     slug: m.slug,
                     outcomeIdx: idx,
-                    expiryDate: m.endDate
+                    expiryDate: endDate
                 });
             }
         });
     });
 
-    return { deals };
+    return opportunities;
 }
 
-function triggerAlphaAlert(deal) {
-    chrome.notifications.create(NOTIF_PREFIX + deal.slug, {
+// ─── Notifications ─────────────────────────────────────────────────
+function triggerNotification(opportunity) {
+    chrome.notifications.create(`polylens_${opportunity.slug}`, {
         type: "basic",
         iconUrl: "icons/icon128.png",
-        title: "🔥 Alpha Opportunity Found",
-        message: `${deal.roi}% Yield found on: ${deal.title}\nOutcome: ${deal.outcome} (${deal.probability}%)`,
+        title: "⚡ New High-Confidence Opportunity",
+        message: `${opportunity.probability}% — ${opportunity.title}\n+${opportunity.roi}% potential ROI`,
         priority: 2
     });
 }
 
-chrome.notifications.onClicked.addListener((id) => {
-    if (id.startsWith(NOTIF_PREFIX)) {
-        chrome.tabs.create({ url: 'deals.html' });
-    }
+chrome.notifications.onClicked.addListener(id => {
+    if (id.startsWith("polylens_")) chrome.tabs.create({ url: "deals.html" });
 });
 
-// Message Routing
+// ─── Message Routing ───────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === "manualSync") {
         performBackgroundScan().then(() => sendResponse({ ok: true }));
         return true;
     }
-
     if (msg.action === "getMarkets") {
-        chrome.storage.local.get([MARKET_MAP_KEY], (res) => {
-            sendResponse({ data: res[MARKET_MAP_KEY] || {} });
-        });
+        chrome.storage.local.get([MARKET_MAP_KEY], res => sendResponse({ data: res[MARKET_MAP_KEY] || {} }));
         return true;
     }
-
     if (msg.action === "getCount") {
-        chrome.storage.local.get([CACHE_KEY], (res) => {
-            sendResponse({ count: res[CACHE_KEY]?.count || 0 });
-        });
+        chrome.storage.local.get([CACHE_KEY], res => sendResponse({
+            count: res[CACHE_KEY]?.count || 0,
+            timestamp: res[CACHE_KEY]?.timestamp || null
+        }));
         return true;
     }
 });
