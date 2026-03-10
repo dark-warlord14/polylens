@@ -90,9 +90,20 @@ async function loadFromCache() {
 // ─── Event Listeners ───────────────────────────────────────────────
 
 function setupEventListeners() {
-    ["min-volume", "max-days", "min-prob", "sort-by"].forEach(id => {
+    ["min-volume", "max-days", "min-prob", "max-prob", "sort-by"].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener("input", applyFilters);
+        if (el) el.addEventListener("input", () => {
+            // Auto-clamp: keep min ≤ max when either changes
+            const minEl = document.getElementById("min-prob");
+            const maxEl = document.getElementById("max-prob");
+            if (minEl && maxEl && id === "min-prob" && parseFloat(minEl.value) > parseFloat(maxEl.value)) {
+                maxEl.value = minEl.value;
+            }
+            if (minEl && maxEl && id === "max-prob" && parseFloat(maxEl.value) < parseFloat(minEl.value)) {
+                minEl.value = maxEl.value;
+            }
+            applyFilters();
+        });
     });
     document.getElementById("refresh-btn")?.addEventListener("click", manualSync);
     document.getElementById("empty-sync-btn")?.addEventListener("click", manualSync);
@@ -108,6 +119,7 @@ async function saveConfig() {
         minVolume: document.getElementById("min-volume")?.value || "10000",
         maxDays: document.getElementById("max-days")?.value || "1",
         minProb: document.getElementById("min-prob")?.value || "80",
+        maxProb: document.getElementById("max-prob")?.value || "99",
         sortBy: document.getElementById("sort-by")?.value || "roi"
     };
     await chrome.storage.sync.set({ [CONFIG_KEY]: config });
@@ -141,6 +153,7 @@ async function loadConfig() {
     set("min-volume", config.minVolume);
     set("max-days", config.maxDays);
     set("min-prob", config.minProb);
+    set("max-prob", config.maxProb);
     set("sort-by", config.sortBy);
 }
 
@@ -224,10 +237,14 @@ function applyFilters() {
     const minVol = parseFloat(document.getElementById("min-volume")?.value) || 0;
     const maxDays = parseFloat(document.getElementById("max-days")?.value) || 999;
     const minProb = parseFloat(document.getElementById("min-prob")?.value) || 0;
+    const maxProb = parseFloat(document.getElementById("max-prob")?.value) || 100;
     const sortBy = document.getElementById("sort-by")?.value || "roi";
 
     const sidebarFiltered = allOpportunities.filter(d =>
-        d.volume >= minVol && d.daysLeft <= maxDays && d.probability >= minProb
+        d.volume >= minVol &&
+        d.daysLeft <= maxDays &&
+        d.probability >= minProb &&
+        d.probability <= maxProb
     );
 
     updateCategoryChips(sidebarFiltered);

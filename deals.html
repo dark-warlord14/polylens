@@ -54,12 +54,19 @@
             </div>
 
             <div class="filter-group">
-                <label>Probability Floor</label>
+                <label>Probability Range</label>
                 <div class="input-card">
-                    <span class="label">Minimum outcome prob</span>
-                    <div class="input-row">
-                        <input type="number" id="min-prob" value="80" step="5" min="0" max="99">
-                        <span class="unit">%</span>
+                    <span class="label">Outcome probability window</span>
+                    <div class="prob-range-row">
+                        <div class="input-row">
+                            <input type="number" id="min-prob" value="80" step="5" min="1" max="99" placeholder="1">
+                            <span class="unit">%</span>
+                        </div>
+                        <span class="range-sep">→</span>
+                        <div class="input-row">
+                            <input type="number" id="max-prob" value="99" step="5" min="1" max="99" placeholder="99">
+                            <span class="unit">%</span>
+                        </div>
                     </div>
                 </div>
             </div>

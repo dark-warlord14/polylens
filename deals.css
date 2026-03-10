@@ -176,6 +176,25 @@ body {
     flex-shrink: 0;
 }
 
+/* Probability min→max range row */
+.prob-range-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.prob-range-row .input-row {
+    flex: 1;
+    min-width: 0;
+}
+
+.range-sep {
+    color: var(--text-3);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    padding: 0 2px;
+}
+
 .select-wrapper select {
     width: 100%;
     background: var(--surface-2);
